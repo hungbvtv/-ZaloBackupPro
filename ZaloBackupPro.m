@@ -33,9 +33,23 @@
     }
     return [r sortedArrayUsingComparator:^(id a,id b){return [b compare:a];}];
 }
+- (UIWindowScene *)activeScene {
+    for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+        if (s.activationState == UISceneActivationStateForegroundActive &&
+            [s isKindOfClass:[UIWindowScene class]])
+            return (UIWindowScene *)s;
+    }
+    return nil;
+}
 - (UIViewController *)topVC {
-    UIViewController *v = UIApplication.sharedApplication.keyWindow.rootViewController;
-    while (v.presentedViewController) v = v.presentedViewController; return v;
+    UIViewController *v = nil;
+    UIWindowScene *scene = [self activeScene];
+    for (UIWindow *w in scene.windows) {
+        if (w.isKeyWindow) { v = w.rootViewController; break; }
+    }
+    if (!v) v = scene.windows.firstObject.rootViewController;
+    while (v.presentedViewController) v = v.presentedViewController;
+    return v;
 }
 - (void)startBackupFlow {
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Dat Ten Backup"
@@ -115,7 +129,11 @@
             writeToFile:[dest stringByAppendingPathComponent:@"info.plist"] atomically:YES];
         dispatch_async(dispatch_get_main_queue(), ^{
             [self alert:@"Backup Hoan Tat"
-                    msg:[NSString stringWithFormat:@"Database : %ld file\nMedia    : %ld file\n\nLuu tai:\n%@",(long)db,(long)md,dest]];
+                    msg:[NSString stringWithFormat:@"Database : %ld file
+Media    : %ld file
+
+Luu tai:
+%@",(long)db,(long)md,dest]];
         });
     });
 }
@@ -158,7 +176,8 @@
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             [self alert:@"Khoi Phuc Xong"
-                    msg:[NSString stringWithFormat:@"Da khoi phuc %ld file.\nHay TAT va MO LAI Zalo.",(long)count]];
+                    msg:[NSString stringWithFormat:@"Da khoi phuc %ld file.
+Hay TAT va MO LAI Zalo.",(long)count]];
         });
     });
 }
@@ -178,6 +197,16 @@
 - (instancetype)init {
     self = [super initWithFrame:CGRectMake(0,0,62,62)];
     if (!self) return nil;
+    // Fix iOS 13+ windowScene
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]] &&
+                scene.activationState == UISceneActivationStateForegroundActive) {
+                self.windowScene = (UIWindowScene *)scene;
+                break;
+            }
+        }
+    }
     self.windowLevel = UIWindowLevelAlert + 1;
     self.backgroundColor = UIColor.clearColor;
     UIRootVC *rvc = UIRootVC.new; self.rootViewController = rvc;
@@ -188,8 +217,9 @@
     self.mainBtn.backgroundColor = [UIColor colorWithRed:0.04 green:0.49 blue:0.98 alpha:0.93];
     self.mainBtn.layer.cornerRadius = 28;
     self.mainBtn.layer.shadowColor = UIColor.blackColor.CGColor;
-    self.mainBtn.layer.shadowOpacity = 0.3; self.mainBtn.layer.shadowOffset = CGSizeMake(0,3);
-    [self.mainBtn setTitle:@"" forState:UIControlStateNormal];
+    self.mainBtn.layer.shadowOpacity = 0.3;
+    self.mainBtn.layer.shadowOffset = CGSizeMake(0,3);
+    [self.mainBtn setTitle:@"S" forState:UIControlStateNormal];
     self.mainBtn.titleLabel.font = [UIFont systemFontOfSize:26];
     [self.mainBtn addTarget:self action:@selector(toggle) forControlEvents:UIControlEventTouchUpInside];
     [v addSubview:self.mainBtn];
@@ -216,9 +246,12 @@
 
     UIPanGestureRecognizer *p = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(drag:)];
     [self.mainBtn addGestureRecognizer:p];
-    CGRect s = UIScreen.mainScreen.bounds;
+
+    UIWindowScene *scene = self.windowScene;
+    CGRect s = scene ? scene.coordinateSpace.bounds : UIScreen.mainScreen.bounds;
     self.frame = CGRectMake(s.size.width-72, s.size.height-155, 62, 62);
-    self.hidden = NO; return self;
+    self.hidden = NO;
+    return self;
 }
 - (void)toggle {
     self.open = !self.open;
@@ -236,7 +269,9 @@
 - (void)rs  { [self toggle]; [ZBManager.shared restore]; }
 - (void)drag:(UIPanGestureRecognizer *)g {
     CGPoint t = [g translationInView:nil];
-    CGRect f = self.frame, s = UIScreen.mainScreen.bounds;
+    CGRect f = self.frame;
+    UIWindowScene *scene = self.windowScene;
+    CGRect s = scene ? scene.coordinateSpace.bounds : UIScreen.mainScreen.bounds;
     f.origin.x = MAX(8,  MIN(f.origin.x+t.x, s.size.width -72));
     f.origin.y = MAX(50, MIN(f.origin.y+t.y, s.size.height-115));
     self.frame = f; [g setTranslation:CGPointZero inView:nil];
@@ -246,6 +281,6 @@
 static ZBWindow *_w;
 __attribute__((constructor))
 static void Init() {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.5*NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(2.0*NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ _w = ZBWindow.new; });
 }
