@@ -19,6 +19,7 @@ jobs:
             -isysroot $SDK \
             -framework Foundation \
             -framework UIKit \
+            -framework CoreGraphics \
             -framework UniformTypeIdentifiers \
             -mios-version-min=13.0 \
             -dynamiclib \
