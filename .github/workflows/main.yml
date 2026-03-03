@@ -22,6 +22,7 @@ jobs:
             -framework UIKit \
             -framework CoreGraphics \
             -framework UniformTypeIdentifiers \
+            -framework QuartzCore \
             -mios-version-min=13.0 \
             -dynamiclib \
             -o output/ZaloBackupPro.dylib \
