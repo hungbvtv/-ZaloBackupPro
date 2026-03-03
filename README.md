@@ -1,10 +1,11 @@
-# ZaloBackupPro
+# ZaloBackupPro (Ultimate Edition)
+Hỗ trợ iOS 16, 17 và 18.
 
-Công cụ hỗ trợ sao lưu và khôi phục dữ liệu Zalo trực tiếp trên iOS.
+## Lưu ý sống còn:
+Khi ký (Sign) IPA bằng Esign, bạn **BẮT BUỘC** phải bật tùy chọn:
+1. **Chia sẻ tệp (File Sharing)**: Nếu không bật, folder backup sẽ không hiện trong Files app.
+2. **Support Document Browser**: Bật nếu có để iOS cho phép xem file database.
 
-## Hướng dẫn
-1. Push code lên GitHub.
-2. Vào tab **Actions** -> Chạy workflow build.
-3. Tải dylib từ mục **Artifacts**.
-4. Inject vào Zalo IPA bằng Esign/GBox.
-5. **Quan trọng:** Khi ký (Sign) IPA, phải bật **"File Sharing"** để xem được folder sao lưu trong ứng dụng Tệp (Files).
+## Cách dùng:
+- Nhấn **ZPRO** -> Chọn Backup.
+- Sau khi xong, mở ứng dụng **Tệp (Files)** -> **Trên iPhone** -> **Zalo** để thấy folder `ZaloBackupPro_Data`.
