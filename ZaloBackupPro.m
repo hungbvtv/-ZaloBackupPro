@@ -48,11 +48,14 @@
                 NSString *file;
                 while ((file = [en nextObject])) {
                     @autoreleasepool {
+                        // CHỐNG SAO LƯU LẶP VÔ TẬN
                         if ([file containsString:@"ZaloBackupPro_Data"]) continue;
+
                         if ([exts containsObject:file.pathExtension.lowercaseString]) {
                             NSString *src = [rootPath stringByAppendingPathComponent:file];
                             NSString *safeName = [NSString stringWithFormat:@"%@%@", prefix, [file stringByReplacingOccurrencesOfString:@"/" withString:@"|"]];
                             NSString *dst = [dest stringByAppendingPathComponent:safeName];
+                            
                             [fm removeItemAtPath:dst error:nil];
                             if ([fm copyItemAtPath:src toPath:dst error:nil]) count++;
                         }
@@ -62,8 +65,8 @@
             
             dispatch_async(dispatch_get_main_queue(), ^{
                 self->_isProcessing = NO;
-                UIAlertController *done = [UIAlertController alertControllerWithTitle:@"ZaloBackup Pro" message:[NSString stringWithFormat:@"Đã sao lưu thành công %ld tệp tin.", (long)count] preferredStyle:UIAlertControllerStyleAlert];
-                [done addAction:[UIAlertAction actionWithTitle:@"Đóng" style:UIAlertActionStyleDefault handler:nil]];
+                UIAlertController *done = [UIAlertController alertControllerWithTitle:@"ZaloBackup Pro" message:[NSString stringWithFormat:@"Đã sao lưu %ld tệp thành công!\nBạn có thể lấy file trong ứng dụng Tệp (Files).", (long)count] preferredStyle:UIAlertControllerStyleAlert];
+                [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
                 [vc presentViewController:done animated:YES completion:nil];
             });
         }
@@ -77,14 +80,14 @@
     NSArray *files = [fm contentsOfDirectoryAtPath:srcDir error:nil];
     
     if (files.count == 0) {
-        UIAlertController *err = [UIAlertController alertControllerWithTitle:@"Lỗi" message:@"Không thấy dữ liệu sao lưu." preferredStyle:UIAlertControllerStyleAlert];
+        UIAlertController *err = [UIAlertController alertControllerWithTitle:@"Lỗi" message:@"Không thấy bản sao lưu nào." preferredStyle:UIAlertControllerStyleAlert];
         [err addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [vc presentViewController:err animated:YES completion:nil];
         return;
     }
 
-    UIAlertController *res = [UIAlertController alertControllerWithTitle:@"Khôi Phục" message:@"Dữ liệu hiện tại sẽ bị ghi đè. App sẽ đóng để hoàn tất." preferredStyle:UIAlertControllerStyleAlert];
-    [res addAction:[UIAlertAction actionWithTitle:@"Bắt Đầu" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    UIAlertController *res = [UIAlertController alertControllerWithTitle:@"Khôi Phục" message:@"Dữ liệu hiện tại sẽ bị ghi đè hoàn toàn. Zalo sẽ tự đóng sau khi xong." preferredStyle:UIAlertControllerStyleAlert];
+    [res addAction:[UIAlertAction actionWithTitle:@"Khôi Phục Ngay" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         self->_isProcessing = YES;
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             @autoreleasepool {
@@ -123,16 +126,21 @@
 - (instancetype)initWithWindowScene:(UIWindowScene *)scene {
     self = [super initWithWindowScene:scene];
     if (self) {
+        // WINDOW CHỈ NHỎ BẰNG CÁI NÚT ĐỂ KHÔNG CHẶN CẢM ỨNG
         self.frame = CGRectMake(20, 250, 60, 60); 
         self.windowLevel = UIWindowLevelAlert + 100;
         self.backgroundColor = [UIColor clearColor];
         self.rootViewController = [UIViewController new];
+        
         self.btn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.btn.frame = self.bounds;
-        self.btn.backgroundColor = [UIColor systemBlueColor];
+        self.btn.backgroundColor = [UIColor colorWithRed:0 green:0.47 blue:1 alpha:0.9];
         self.btn.layer.cornerRadius = 30;
+        self.btn.layer.shadowOpacity = 0.3;
         [self.btn setTitle:@"ZPRO" forState:UIControlStateNormal];
+        self.btn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
         [self.btn addTarget:self action:@selector(btnTapped) forControlEvents:UIControlEventTouchUpInside];
+        
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(pan:)];
         [self addGestureRecognizer:pan];
         [self addSubview:self.btn];
@@ -140,9 +148,11 @@
     return self;
 }
 
+// XUYÊN QUA WINDOW NẾU KHÔNG BẤM VÀO NÚT
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *view = [super hitTest:point withEvent:event];
-    return (view == self.btn || self.rootViewController.presentedViewController) ? view : nil;
+    if (view == self.btn || self.rootViewController.presentedViewController) return view;
+    return nil;
 }
 
 - (void)btnTapped {
@@ -166,6 +176,7 @@
 
 static ZBWindow *zWin;
 __attribute__((constructor)) static void init() {
+    // CHỐNG NHÁY: Chỉ khởi tạo khi App đã sẵn sàng
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
         if (!zWin) {
             for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
