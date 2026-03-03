@@ -14,7 +14,6 @@ jobs:
 
       - name: Compile dylib
         run: |
-          mkdir -p output
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           clang -arch arm64 \
             -isysroot $SDK \
@@ -24,11 +23,11 @@ jobs:
             -framework UniformTypeIdentifiers \
             -mios-version-min=13.0 \
             -dynamiclib \
-            -o output/ZaloBackupPro.dylib \
+            -o ZaloBackupPro.dylib \
             ZaloBackupPro.m
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ZaloBackupPro-dylib
-          path: output/ZaloBackupPro.dylib
+          path: ZaloBackupPro.dylib
