@@ -1,21 +1,19 @@
 # ZaloBackupPro
+Dylib inject vào Zalo để backup/restore tin nhắn, ảnh, video.
 
-Dylib inject vao Zalo de backup/restore tin nhan, anh, video.
+## Tính năng
+- Floating button (Nút nổi) có thể kéo thả.
+- Backup: DB + Media vào thư mục Documents của App hoặc Files App.
+- Restore: Chọn bản backup để khôi phục.
 
-## Tinh nang
-- Floating button keo duoc tren man hinh
-- Backup: DB + Media -> chon thu muc tuy chinh hoac Files app
-- Restore: chon ban backup de khoi phuc
+## Cách dùng
+1. Push code lên GitHub.
+2. Vào tab **Actions** -> Chạy workflow **Build ZaloBackupPro dylib**.
+3. Tải file `ZaloBackupPro.dylib` từ Artifacts.
+4. Inject vào IPA Zalo bằng Esign, GBox hoặc Sideloadly.
 
-## Cach dung
-1. Push code len GitHub
-2. Vao tab **Actions** -> chay workflow **Build ZaloBackupPro dylib**
-3. Tai file `ZaloBackupPro.dylib` tu Artifacts
-4. Inject vao IPA Zalo bang Esign/GBox
-
-## Compile thu cong (can Mac)
-```
+## Compile thủ công (Cần Mac)
+```bash
 clang -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
   -framework Foundation -framework UIKit -framework UniformTypeIdentifiers \
-  -mios-version-min=13.0 -dynamiclib -o ZaloBackupPro.dylib Sources/ZaloBackupPro.m
-```
+  -mios-version-min=13.0 -dynamiclib -o ZaloBackupPro.dylib ZaloBackupPro.m
