@@ -247,7 +247,7 @@
     self = [super initWithWindowScene:scene];
     if (!self) return nil;
     self.frame = scene.coordinateSpace.bounds;
-    self.windowLevel = UIWindowLevelAlert + 1000;
+    self.windowLevel = UIWindowLevelNormal + 1;
     self.backgroundColor = UIColor.clearColor;
     self.rootVC = [ZBRootVC new];
     self.rootViewController = self.rootVC;
