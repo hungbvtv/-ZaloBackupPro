@@ -5,6 +5,13 @@
 
 #define ZB_CHUNK 16384
 
+// ============================================================
+// ZaloBackup Pro - Final
+// - Giu nguyen v8 (UIWindow rieng, nut ZPRO noi)
+// - Backup ra file .zip that
+// - Auto backup theo lich (chon so gio)
+// ============================================================
+
 @interface ZBZip : NSObject
 + (BOOL)zipFiles:(NSArray<NSDictionary *> *)files toPath:(NSString *)zipPath;
 + (NSDictionary *)unzipFile:(NSString *)zipPath;
@@ -77,10 +84,14 @@
 
 @interface ZBManager : NSObject <UIDocumentPickerDelegate>
 + (instancetype)shared;
-- (void)backupFrom:(UIViewController *)vc;
+- (void)backupFrom:(UIViewController *)vc silent:(BOOL)silent;
 - (void)restoreFrom:(UIViewController *)vc;
+- (void)startAutoBackup:(NSInteger)hours vc:(UIViewController *)vc;
+- (void)stopAutoBackup;
 @property (nonatomic, strong) UIViewController *pendingVC;
 @property (nonatomic, assign) BOOL busy;
+@property (nonatomic, strong) NSTimer *autoTimer;
+@property (nonatomic, assign) NSInteger autoHours;
 @end
 
 @implementation ZBManager
@@ -91,53 +102,102 @@
 - (UIViewController *)topVC:(UIViewController *)vc {
     while (vc.presentedViewController) vc=vc.presentedViewController; return vc;
 }
-- (void)backupFrom:(UIViewController *)vc {
-    if (self.busy) return; self.busy=YES;
-    dispatch_async(dispatch_get_global_queue(0,0),^{
-        NSFileManager *fm=NSFileManager.defaultManager;
-        NSArray *sources=@[
-            @{@"path":[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"],@"prefix":@"L|"},
-            @{@"path":[NSHomeDirectory() stringByAppendingPathComponent:@"Documents"],@"prefix":@"D|"},
-            @{@"path":[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches"],@"prefix":@"C|"}
-        ];
-        NSSet *exts=[NSSet setWithArray:@[@"db",@"sqlite",@"sqlite3",@"sqlite-wal",@"sqlite-shm",@"db-wal",@"db-shm",@"jpg",@"jpeg",@"png",@"mp4",@"mov",@"plist",@"m4a",@"aac",@"mp3"]];
-        NSMutableArray *entries=[NSMutableArray array];
-        for (NSDictionary *src in sources) {
-            NSString *root=src[@"path"];
-            if (![fm fileExistsAtPath:root]) continue;
-            NSDirectoryEnumerator *en=[fm enumeratorAtPath:root];
-            NSString *f;
-            while ((f=en.nextObject)) {
-                if ([f containsString:@"ZaloBackupPro"]) continue;
-                if ([exts containsObject:f.pathExtension.lowercaseString]) {
-                    NSData *d=[NSData dataWithContentsOfFile:[root stringByAppendingPathComponent:f]];
-                    if (!d) continue;
-                    [entries addObject:@{
-                        @"name":[NSString stringWithFormat:@"%@%@",src[@"prefix"],[f stringByReplacingOccurrencesOfString:@"/" withString:@"|"]],
-                        @"data":d
-                    }];
-                }
+
+- (NSMutableArray *)collectFiles {
+    NSFileManager *fm=NSFileManager.defaultManager;
+    NSArray *sources=@[
+        @{@"path":[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"],@"prefix":@"L|"},
+        @{@"path":[NSHomeDirectory() stringByAppendingPathComponent:@"Documents"],@"prefix":@"D|"},
+        @{@"path":[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches"],@"prefix":@"C|"}
+    ];
+    NSSet *exts=[NSSet setWithArray:@[@"db",@"sqlite",@"sqlite3",@"sqlite-wal",@"sqlite-shm",@"db-wal",@"db-shm",@"jpg",@"jpeg",@"png",@"mp4",@"mov",@"plist",@"m4a",@"aac",@"mp3"]];
+    NSMutableArray *entries=[NSMutableArray array];
+    for (NSDictionary *src in sources) {
+        NSString *root=src[@"path"];
+        if (![fm fileExistsAtPath:root]) continue;
+        NSDirectoryEnumerator *en=[fm enumeratorAtPath:root];
+        NSString *f;
+        while ((f=en.nextObject)) {
+            if ([f containsString:@"ZaloBackupPro"]) continue;
+            if ([exts containsObject:f.pathExtension.lowercaseString]) {
+                NSData *d=[NSData dataWithContentsOfFile:[root stringByAppendingPathComponent:f]];
+                if (!d) continue;
+                [entries addObject:@{
+                    @"name":[NSString stringWithFormat:@"%@%@",src[@"prefix"],[f stringByReplacingOccurrencesOfString:@"/" withString:@"|"]],
+                    @"data":d
+                }];
             }
         }
+    }
+    return entries;
+}
+
+- (void)backupFrom:(UIViewController *)vc silent:(BOOL)silent {
+    if (self.busy) return; self.busy=YES;
+    dispatch_async(dispatch_get_global_queue(0,0),^{
+        NSMutableArray *entries=[self collectFiles];
         NSDateFormatter *df=[NSDateFormatter new]; df.dateFormat=@"yyyyMMdd_HHmmss";
-        NSString *fname=[NSString stringWithFormat:@"ZaloBackup_%@.zbak",[df stringFromDate:NSDate.date]];
+        NSString *fname=[NSString stringWithFormat:@"ZaloBackup_%@.zip",[df stringFromDate:NSDate.date]];
         NSString *tmp=[NSTemporaryDirectory() stringByAppendingPathComponent:fname];
         BOOL ok=[ZBZip zipFiles:entries toPath:tmp];
         dispatch_async(dispatch_get_main_queue(),^{
             self.busy=NO;
-            if (ok) {
+            if (!ok) {
+                if (!silent) {
+                    UIAlertController *err=[UIAlertController alertControllerWithTitle:@"Loi" message:@"Khong the tao file backup." preferredStyle:UIAlertControllerStyleAlert];
+                    [err addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                    [[self topVC:vc] presentViewController:err animated:YES completion:nil];
+                }
+                return;
+            }
+            if (silent) {
+                // Auto backup: luu vao Documents, khong can share
+                NSString *docsDir=[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES) firstObject];
+                NSString *dest=[docsDir stringByAppendingPathComponent:fname];
+                [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
+                [[NSFileManager defaultManager] copyItemAtPath:tmp toPath:dest error:nil];
+                // Hien thong bao nhe
+                UIAlertController *done=[UIAlertController alertControllerWithTitle:@"Auto Backup Xong"
+                    message:[NSString stringWithFormat:@"Da luu: %@\nTiep theo sau %ld gio.",fname,(long)self.autoHours]
+                    preferredStyle:UIAlertControllerStyleAlert];
+                [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+                    if (vc.presentedViewController==done) [done dismissViewControllerAnimated:YES completion:nil];
+                });
+                [[self topVC:vc] presentViewController:done animated:YES completion:nil];
+            } else {
+                // Manual backup: mo share sheet
                 UIActivityViewController *avc=[[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:tmp]] applicationActivities:nil];
                 if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad)
                     avc.popoverPresentationController.sourceView=vc.view;
                 [[self topVC:vc] presentViewController:avc animated:YES completion:nil];
-            } else {
-                UIAlertController *err=[UIAlertController alertControllerWithTitle:@"Loi" message:@"Khong the tao file backup." preferredStyle:UIAlertControllerStyleAlert];
-                [err addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                [[self topVC:vc] presentViewController:err animated:YES completion:nil];
             }
         });
     });
 }
+
+- (void)startAutoBackup:(NSInteger)hours vc:(UIViewController *)vc {
+    [self stopAutoBackup];
+    self.autoHours=hours;
+    self.pendingVC=vc;
+    // Backup ngay lan dau
+    [self backupFrom:vc silent:YES];
+    // Dat timer
+    self.autoTimer=[NSTimer scheduledTimerWithTimeInterval:hours*3600
+        target:self selector:@selector(autoBackupFire) userInfo:nil repeats:YES];
+}
+
+- (void)autoBackupFire {
+    UIViewController *vc=self.pendingVC;
+    if (!vc) return;
+    [self backupFrom:vc silent:YES];
+}
+
+- (void)stopAutoBackup {
+    [self.autoTimer invalidate];
+    self.autoTimer=nil;
+}
+
 - (void)restoreFrom:(UIViewController *)vc {
     if (self.busy) return; self.pendingVC=vc;
     UIDocumentPickerViewController *picker;
@@ -179,139 +239,134 @@
 @end
 
 // ============================================================
-// Inject vao Zalo window - an hoan toan
-// Double tap goc PHAI DUOI de hien/an nut ZPRO
+// ZBWindow - giu nguyen v8, co them menu Auto Backup
 // ============================================================
-
-static UIButton *_zbBtn = nil;
-static UIView *_zbCorner = nil;
-static BOOL _zbVisible = NO;
-
-static UIViewController * zbTopVC() {
-    UIWindowScene *scene=nil;
-    for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
-        if (s.activationState==UISceneActivationStateForegroundActive &&
-            [s isKindOfClass:[UIWindowScene class]]) { scene=(UIWindowScene*)s; break; }
-    }
-    UIWindow *win=nil;
-    for (UIWindow *w in scene.windows) {
-        if (!w.isHidden && w.alpha>0) { win=w; break; }
-    }
-    UIViewController *vc=win.rootViewController;
-    while (vc.presentedViewController) vc=vc.presentedViewController;
-    return vc;
-}
-
-static void zbToggleButton() {
-    if (!_zbBtn) return;
-    if (_zbVisible) {
-        [UIView animateWithDuration:0.2 animations:^{ _zbBtn.alpha=0; }
-            completion:^(BOOL f){ _zbBtn.hidden=YES; _zbVisible=NO; }];
-    } else {
-        _zbBtn.hidden=NO; _zbBtn.alpha=0;
-        [UIView animateWithDuration:0.25 animations:^{ _zbBtn.alpha=1; }];
-        _zbVisible=YES;
-    }
-}
-
-@interface UIButton (ZBFinal)
-- (void)zbFinalTap;
-- (void)zbFinalPan:(UIPanGestureRecognizer *)p;
+@interface ZBRootVC : UIViewController @end
+@implementation ZBRootVC
+- (BOOL)prefersStatusBarHidden { return YES; }
 @end
-@implementation UIButton (ZBFinal)
-- (void)zbFinalTap {
-    UIViewController *vc = zbTopVC();
-    if (!vc) return;
+
+@interface ZBWindow : UIWindow
+@property (nonatomic, strong) UIButton *btn;
+@property (nonatomic, strong) ZBRootVC *rootVC;
+@end
+
+@implementation ZBWindow
+- (instancetype)initWithWindowScene:(UIWindowScene *)scene {
+    self = [super initWithWindowScene:scene];
+    if (!self) return nil;
+    self.frame = scene.coordinateSpace.bounds;
+    self.windowLevel = UIWindowLevelNormal + 1;
+    self.backgroundColor = UIColor.clearColor;
+    self.rootVC = [ZBRootVC new];
+    self.rootViewController = self.rootVC;
+    self.hidden = NO;
+
+    self.btn = [UIButton buttonWithType:UIButtonTypeCustom];
+    CGRect screen = UIScreen.mainScreen.bounds;
+    self.btn.frame = CGRectMake(screen.size.width-78, screen.size.height*0.55, 62, 62);
+    self.btn.backgroundColor = [UIColor colorWithRed:0 green:0.47 blue:1 alpha:0.88];
+    self.btn.layer.cornerRadius = 31;
+    self.btn.layer.borderWidth = 2;
+    self.btn.layer.borderColor = UIColor.whiteColor.CGColor;
+    self.btn.layer.shadowColor = UIColor.blackColor.CGColor;
+    self.btn.layer.shadowOpacity = 0.35;
+    self.btn.layer.shadowOffset = CGSizeMake(0,3);
+    [self.btn setTitle:@"ZPRO" forState:UIControlStateNormal];
+    self.btn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
+    [self.btn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [self.btn addTarget:self action:@selector(btnTapped) forControlEvents:UIControlEventTouchUpInside];
+    UIPanGestureRecognizer *pan=[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(pan:)];
+    [self.btn addGestureRecognizer:pan];
+    [self.rootVC.view addSubview:self.btn];
+    return self;
+}
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    CGPoint p=[self.rootVC.view convertPoint:point fromView:self];
+    if (CGRectContainsPoint(self.btn.frame,p)) return self.btn;
+    if (self.rootVC.presentedViewController) return [super hitTest:point withEvent:event];
+    return nil;
+}
+- (void)btnTapped {
+    ZBManager *mgr=[ZBManager shared];
+    NSString *autoTitle = mgr.autoTimer
+        ? [NSString stringWithFormat:@"Dung Auto Backup (%ldh)",(long)mgr.autoHours]
+        : @"Bat Auto Backup...";
+
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"ZaloBackup Pro"
         message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     [menu addAction:[UIAlertAction actionWithTitle:@"Backup" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_){
-        _zbBtn.hidden=YES; _zbVisible=NO;
-        [[ZBManager shared] backupFrom:vc];
+        [[ZBManager shared] backupFrom:self.rootVC silent:NO];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_){
-        _zbBtn.hidden=YES; _zbVisible=NO;
-        [[ZBManager shared] restoreFrom:vc];
+        [[ZBManager shared] restoreFrom:self.rootVC];
     }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"An di" style:UIAlertActionStyleCancel handler:^(UIAlertAction *_){
-        [UIView animateWithDuration:0.2 animations:^{ _zbBtn.alpha=0; }
-            completion:^(BOOL f){ _zbBtn.hidden=YES; _zbVisible=NO; }];
+    [menu addAction:[UIAlertAction actionWithTitle:autoTitle style:UIAlertActionStyleDefault handler:^(UIAlertAction *_){
+        if (mgr.autoTimer) {
+            [mgr stopAutoBackup];
+            UIAlertController *done=[UIAlertController alertControllerWithTitle:@"Da Tat Auto Backup" message:nil preferredStyle:UIAlertControllerStyleAlert];
+            [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self.rootVC presentViewController:done animated:YES completion:nil];
+        } else {
+            [self showAutoBackupPicker];
+        }
     }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"Dong" style:UIAlertActionStyleCancel handler:nil]];
     if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad)
-        menu.popoverPresentationController.sourceView=self;
-    [vc presentViewController:menu animated:YES completion:nil];
+        menu.popoverPresentationController.sourceView=self.btn;
+    [self.rootVC presentViewController:menu animated:YES completion:nil];
 }
-- (void)zbFinalPan:(UIPanGestureRecognizer *)p {
-    CGPoint t=[p translationInView:self.superview];
-    CGRect f=self.frame, b=self.superview.bounds;
+- (void)showAutoBackupPicker {
+    UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Auto Backup Moi Bao Lau?"
+        message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray *opts=@[@"1 gio",@"2 gio",@"4 gio",@"6 gio",@"12 gio",@"24 gio"];
+    NSArray *vals=@[@1,@2,@4,@6,@12,@24];
+    for (int i=0;i<opts.count;i++) {
+        NSInteger h=[vals[i] integerValue];
+        NSString *t=opts[i];
+        [ac addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction *_){
+            [[ZBManager shared] startAutoBackup:h vc:self.rootVC];
+            UIAlertController *done=[UIAlertController alertControllerWithTitle:@"Auto Backup Bat"
+                message:[NSString stringWithFormat:@"Se tu dong backup moi %@ va luu vao Documents.",t]
+                preferredStyle:UIAlertControllerStyleAlert];
+            [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self.rootVC presentViewController:done animated:YES completion:nil];
+        }]];
+    }
+    [ac addAction:[UIAlertAction actionWithTitle:@"Huy" style:UIAlertActionStyleCancel handler:nil]];
+    if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad)
+        ac.popoverPresentationController.sourceView=self.btn;
+    [self.rootVC presentViewController:ac animated:YES completion:nil];
+}
+- (void)pan:(UIPanGestureRecognizer *)p {
+    CGPoint t=[p translationInView:self.rootVC.view];
+    CGRect f=self.btn.frame, b=self.rootVC.view.bounds;
     f.origin.x=MAX(8,MIN(f.origin.x+t.x,b.size.width-f.size.width-8));
     f.origin.y=MAX(50,MIN(f.origin.y+t.y,b.size.height-f.size.height-50));
-    self.frame=f;
-    [p setTranslation:CGPointZero inView:self.superview];
+    self.btn.frame=f;
+    [p setTranslation:CGPointZero inView:self.rootVC.view];
 }
 @end
 
-@interface ZBCorner : UIView @end
-@implementation ZBCorner
-- (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
-    return CGRectContainsPoint(self.bounds,p) ? self : nil;
+static ZBWindow *zWin;
+static void launchZPRO() {
+    if (zWin) return;
+    dispatch_async(dispatch_get_main_queue(),^{
+        UIWindowScene *scene=nil;
+        for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+            if (s.activationState==UISceneActivationStateForegroundActive &&
+                [s isKindOfClass:[UIWindowScene class]]) { scene=(UIWindowScene*)s; break; }
+        }
+        if (scene) {
+            zWin=[[ZBWindow alloc] initWithWindowScene:scene];
+        } else {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),
+                dispatch_get_main_queue(),^{ launchZPRO(); });
+        }
+    });
 }
-@end
-
-static void injectZPRO() {
-    UIWindowScene *scene=nil;
-    for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
-        if (s.activationState==UISceneActivationStateForegroundActive &&
-            [s isKindOfClass:[UIWindowScene class]]) { scene=(UIWindowScene*)s; break; }
-    }
-    UIWindow *win=nil;
-    for (UIWindow *w in scene.windows) {
-        if (!w.isHidden && w.alpha>0) { win=w; break; }
-    }
-    if (!win) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(2*NSEC_PER_SEC)),
-            dispatch_get_main_queue(),^{ injectZPRO(); });
-        return;
-    }
-
-    CGRect screen=UIScreen.mainScreen.bounds;
-
-    // Nut ZPRO - an tu dau
-    _zbBtn=[UIButton buttonWithType:UIButtonTypeCustom];
-    _zbBtn.frame=CGRectMake(screen.size.width-78, screen.size.height*0.55, 62, 62);
-    _zbBtn.backgroundColor=[UIColor colorWithRed:0 green:0.47 blue:1 alpha:0.88];
-    _zbBtn.layer.cornerRadius=31;
-    _zbBtn.layer.borderWidth=2;
-    _zbBtn.layer.borderColor=UIColor.whiteColor.CGColor;
-    _zbBtn.layer.shadowColor=UIColor.blackColor.CGColor;
-    _zbBtn.layer.shadowOpacity=0.35;
-    _zbBtn.layer.shadowOffset=CGSizeMake(0,3);
-    _zbBtn.layer.zPosition=9999;
-    [_zbBtn setTitle:@"ZPRO" forState:UIControlStateNormal];
-    _zbBtn.titleLabel.font=[UIFont boldSystemFontOfSize:12];
-    [_zbBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    [_zbBtn addTarget:_zbBtn action:@selector(zbFinalTap) forControlEvents:UIControlEventTouchUpInside];
-    UIPanGestureRecognizer *pan=[[UIPanGestureRecognizer alloc] initWithTarget:_zbBtn action:@selector(zbFinalPan:)];
-    [_zbBtn addGestureRecognizer:pan];
-    _zbBtn.hidden=YES;
-    _zbVisible=NO;
-    [win addSubview:_zbBtn];
-
-    // Vung cam ung bi mat goc phai duoi (80x80) - trong suot
-    _zbCorner=[[ZBCorner alloc] initWithFrame:CGRectMake(
-        screen.size.width-80, screen.size.height-80, 80, 80)];
-    _zbCorner.backgroundColor=UIColor.clearColor;
-    _zbCorner.layer.zPosition=9998;
-
-    UITapGestureRecognizer *dTap=[[UITapGestureRecognizer alloc]
-        initWithTarget:[NSBlockOperation blockOperationWithBlock:^{ zbToggleButton(); }]
-        action:@selector(main)];
-    dTap.numberOfTapsRequired=2;
-    [_zbCorner addGestureRecognizer:dTap];
-    [win addSubview:_zbCorner];
-}
-
 __attribute__((constructor))
 static void zbInit() {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(5*NSEC_PER_SEC)),
-        dispatch_get_main_queue(),^{ injectZPRO(); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),
+        dispatch_get_main_queue(),^{ launchZPRO(); });
 }
