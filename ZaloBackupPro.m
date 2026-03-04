@@ -409,7 +409,7 @@
             [mgr startAutoBackup:h vc:self.rootVC];
         }]];
     }
-    [ac addAction:[UIAlertAction actionWithTitle:@"Huy" style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:@"Hủy" style:UIAlertActionStyleCancel handler:nil]];
     if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad)
         ac.popoverPresentationController.sourceView=self.btn;
     [self.rootVC presentViewController:ac animated:YES completion:nil];
@@ -419,10 +419,10 @@
     ZBManager *m=[ZBManager shared];
     self.badgeDot.hidden=!m.autoTimer;
     if (m.busy) {
-        self.statusLbl.text=@"Dang xu ly...";
+        self.statusLbl.text=@"Đang xử lý...";
         self.statusLbl.textColor=[UIColor colorWithRed:1 green:0.6 blue:0 alpha:1];
     } else if (m.autoTimer) {
-        self.statusLbl.text=[NSString stringWithFormat:@"Auto: moi %ldh • Dang chay",(long)m.autoHours];
+        self.statusLbl.text=[NSString stringWithFormat:@"Auto: moi %ldh • Đang chạy",(long)m.autoHours];
         self.statusLbl.textColor=[UIColor colorWithRed:0.2 green:0.85 blue:0.4 alpha:1];
         // Cap nhat title row auto
         for (UIView *v in self.panel.subviews) {
@@ -431,9 +431,9 @@
                     if ([sv isKindOfClass:[UILabel class]]) {
                         UILabel *l=(UILabel*)sv;
                         if ([l.text isEqualToString:@"Auto Backup"] ||
-                            [l.text hasPrefix:@"Dung Auto"] ||
+                            [l.text hasPrefix:@"Dừng Auto"] ||
                             [l.text isEqualToString:@"Auto Backup"])
-                            l.text=[NSString stringWithFormat:@"Dung Auto (%ldh)",(long)m.autoHours];
+                            l.text=[NSString stringWithFormat:@"Dừng Auto (%ldh)",(long)m.autoHours];
                     }
                 }
             }
