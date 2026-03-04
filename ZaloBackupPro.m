@@ -140,12 +140,9 @@
 }
 - (void)restoreFrom:(UIViewController *)vc {
     if (self.busy) return; self.pendingVC=vc;
+    // Dung public.data string de tranh loi UTType forward declaration
     UIDocumentPickerViewController *picker;
-    if (@available(iOS 14.0,*)) {
-        picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];
-    } else {
-        picker=[[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data"] inMode:UIDocumentPickerModeImport];
-    }
+    picker=[[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data", @"public.item", @"public.content"] inMode:UIDocumentPickerModeImport];
     picker.delegate=self; picker.allowsMultipleSelection=NO;
     [[self topVC:vc] presentViewController:picker animated:YES completion:nil];
 }
