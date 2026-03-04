@@ -401,7 +401,7 @@
     [self dismissPanel];
     UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Auto Backup"
         message:@"Tu dong backup moi bao lau?" preferredStyle:UIAlertControllerStyleActionSheet];
-    NSArray *opts=@[@"1 gio",@"2 gio",@"4 gio",@"6 gio",@"12 gio",@"24 gio"];
+    NSArray *opts=@[@"1 giờ",@"2 giờ",@"4 giờ",@"6 giờ",@"12 giờ",@"24 giờ"];
     NSArray *vals=@[@1,@2,@4,@6,@12,@24];
     for (int i=0;i<opts.count;i++) {
         NSInteger h=[vals[i] integerValue]; NSString *t=opts[i];
