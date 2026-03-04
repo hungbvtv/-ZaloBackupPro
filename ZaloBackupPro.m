@@ -6,10 +6,10 @@
 #define ZB_CHUNK 16384
 
 // ============================================================
-// ZaloBackup Pro - Final
-// - Giu nguyen v8 (UIWindow rieng, nut ZPRO noi)
-// - Backup ra file .zip that
-// - Auto backup theo lich (chon so gio)
+// ZaloBackup Pro - iOS Native Style
+// - Nut tron dep, icon + badge trang thai auto backup
+// - Menu custom panel (khong dung ActionSheet)
+// - Animation muot
 // ============================================================
 
 @interface ZBZip : NSObject
@@ -82,6 +82,7 @@
 }
 @end
 
+// ============================================================
 @interface ZBManager : NSObject <UIDocumentPickerDelegate>
 + (instancetype)shared;
 - (void)backupFrom:(UIViewController *)vc silent:(BOOL)silent;
@@ -92,6 +93,7 @@
 @property (nonatomic, assign) BOOL busy;
 @property (nonatomic, strong) NSTimer *autoTimer;
 @property (nonatomic, assign) NSInteger autoHours;
+@property (nonatomic, copy) void(^onStateChange)(void);
 @end
 
 @implementation ZBManager
@@ -102,7 +104,6 @@
 - (UIViewController *)topVC:(UIViewController *)vc {
     while (vc.presentedViewController) vc=vc.presentedViewController; return vc;
 }
-
 - (NSMutableArray *)collectFiles {
     NSFileManager *fm=NSFileManager.defaultManager;
     NSArray *sources=@[
@@ -131,9 +132,9 @@
     }
     return entries;
 }
-
 - (void)backupFrom:(UIViewController *)vc silent:(BOOL)silent {
     if (self.busy) return; self.busy=YES;
+    if (self.onStateChange) self.onStateChange();
     dispatch_async(dispatch_get_global_queue(0,0),^{
         NSMutableArray *entries=[self collectFiles];
         NSDateFormatter *df=[NSDateFormatter new]; df.dateFormat=@"yyyyMMdd_HHmmss";
@@ -142,6 +143,7 @@
         BOOL ok=[ZBZip zipFiles:entries toPath:tmp];
         dispatch_async(dispatch_get_main_queue(),^{
             self.busy=NO;
+            if (self.onStateChange) self.onStateChange();
             if (!ok) {
                 if (!silent) {
                     UIAlertController *err=[UIAlertController alertControllerWithTitle:@"Loi" message:@"Khong the tao file backup." preferredStyle:UIAlertControllerStyleAlert];
@@ -151,22 +153,11 @@
                 return;
             }
             if (silent) {
-                // Auto backup: luu vao Documents, khong can share
-                NSString *docsDir=[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES) firstObject];
-                NSString *dest=[docsDir stringByAppendingPathComponent:fname];
+                NSString *docs=[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES) firstObject];
+                NSString *dest=[docs stringByAppendingPathComponent:fname];
                 [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
                 [[NSFileManager defaultManager] copyItemAtPath:tmp toPath:dest error:nil];
-                // Hien thong bao nhe
-                UIAlertController *done=[UIAlertController alertControllerWithTitle:@"Auto Backup Xong"
-                    message:[NSString stringWithFormat:@"Da luu: %@\nTiep theo sau %ld gio.",fname,(long)self.autoHours]
-                    preferredStyle:UIAlertControllerStyleAlert];
-                [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
-                    if (vc.presentedViewController==done) [done dismissViewControllerAnimated:YES completion:nil];
-                });
-                [[self topVC:vc] presentViewController:done animated:YES completion:nil];
             } else {
-                // Manual backup: mo share sheet
                 UIActivityViewController *avc=[[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:tmp]] applicationActivities:nil];
                 if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad)
                     avc.popoverPresentationController.sourceView=vc.view;
@@ -175,41 +166,30 @@
         });
     });
 }
-
 - (void)startAutoBackup:(NSInteger)hours vc:(UIViewController *)vc {
     [self stopAutoBackup];
     self.autoHours=hours;
     self.pendingVC=vc;
-    // Backup ngay lan dau
     [self backupFrom:vc silent:YES];
-    // Dat timer
-    self.autoTimer=[NSTimer scheduledTimerWithTimeInterval:hours*3600
-        target:self selector:@selector(autoBackupFire) userInfo:nil repeats:YES];
+    self.autoTimer=[NSTimer scheduledTimerWithTimeInterval:hours*3600 target:self selector:@selector(autoFire) userInfo:nil repeats:YES];
+    if (self.onStateChange) self.onStateChange();
 }
-
-- (void)autoBackupFire {
-    UIViewController *vc=self.pendingVC;
-    if (!vc) return;
-    [self backupFrom:vc silent:YES];
-}
-
+- (void)autoFire { [self backupFrom:self.pendingVC silent:YES]; }
 - (void)stopAutoBackup {
-    [self.autoTimer invalidate];
-    self.autoTimer=nil;
+    [self.autoTimer invalidate]; self.autoTimer=nil;
+    if (self.onStateChange) self.onStateChange();
 }
-
 - (void)restoreFrom:(UIViewController *)vc {
     if (self.busy) return; self.pendingVC=vc;
-    UIDocumentPickerViewController *picker;
-    picker=[[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data",@"public.item"] inMode:UIDocumentPickerModeImport];
-    picker.delegate=self; picker.allowsMultipleSelection=NO;
-    [[self topVC:vc] presentViewController:picker animated:YES completion:nil];
+    UIDocumentPickerViewController *p=[[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data",@"public.item"] inMode:UIDocumentPickerModeImport];
+    p.delegate=self; p.allowsMultipleSelection=NO;
+    [[self topVC:vc] presentViewController:p animated:YES completion:nil];
 }
 - (void)documentPicker:(UIDocumentPickerViewController *)c didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url=urls.firstObject; if (!url) return;
     UIViewController *vc=self.pendingVC;
-    UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Xac Nhan"
-        message:[NSString stringWithFormat:@"Khoi phuc tu:\n%@\n\nApp se tu dong sau khi xong.",url.lastPathComponent]
+    UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Xac nhan khoi phuc"
+        message:[NSString stringWithFormat:@"%@\n\nDu lieu se bi ghi de. App tu dong sau khi xong.",url.lastPathComponent]
         preferredStyle:UIAlertControllerStyleAlert];
     [ac addAction:[UIAlertAction actionWithTitle:@"Khoi Phuc" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_){
         self.busy=YES;
@@ -239,7 +219,177 @@
 @end
 
 // ============================================================
-// ZBWindow - giu nguyen v8, co them menu Auto Backup
+// ZBPanel - Custom menu panel iOS style
+// ============================================================
+@interface ZBPanelRow : UIControl
+@property (nonatomic, strong) UILabel *iconLabel;
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UILabel *subtitleLabel;
+@property (nonatomic, strong) UIView *separator;
+- (instancetype)initWithIcon:(NSString*)icon title:(NSString*)title subtitle:(NSString*)sub;
+@end
+@implementation ZBPanelRow
+- (instancetype)initWithIcon:(NSString*)icon title:(NSString*)title subtitle:(NSString*)sub {
+    self=[super init];
+    self.backgroundColor=UIColor.clearColor;
+    // Icon
+    self.iconLabel=[UILabel new];
+    self.iconLabel.text=icon;
+    self.iconLabel.font=[UIFont systemFontOfSize:22];
+    self.iconLabel.textAlignment=NSTextAlignmentCenter;
+    [self addSubview:self.iconLabel];
+    // Title
+    self.titleLabel=[UILabel new];
+    self.titleLabel.text=title;
+    self.titleLabel.font=[UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+    self.titleLabel.textColor=[UIColor labelColor];
+    [self addSubview:self.titleLabel];
+    // Subtitle
+    if (sub.length) {
+        self.subtitleLabel=[UILabel new];
+        self.subtitleLabel.text=sub;
+        self.subtitleLabel.font=[UIFont systemFontOfSize:12];
+        self.subtitleLabel.textColor=[UIColor secondaryLabelColor];
+        [self addSubview:self.subtitleLabel];
+    }
+    // Separator
+    self.separator=[[UIView alloc] init];
+    self.separator.backgroundColor=[UIColor separatorColor];
+    [self addSubview:self.separator];
+    // Highlight
+    [self addTarget:self action:@selector(highlight) forControlEvents:UIControlEventTouchDown|UIControlEventTouchDragEnter];
+    [self addTarget:self action:@selector(unhighlight) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchDragExit|UIControlEventTouchCancel];
+    return self;
+}
+- (void)highlight { [UIView animateWithDuration:0.1 animations:^{ self.backgroundColor=[UIColor colorWithWhite:0.5 alpha:0.12]; }]; }
+- (void)unhighlight { [UIView animateWithDuration:0.2 animations:^{ self.backgroundColor=UIColor.clearColor; }]; }
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat W=self.bounds.size.width, H=self.bounds.size.height;
+    self.iconLabel.frame=CGRectMake(16,0,36,H);
+    CGFloat tx=62, th=self.subtitleLabel?20:H;
+    CGFloat ty=self.subtitleLabel?(H/2-th):0;
+    self.titleLabel.frame=CGRectMake(tx,ty,W-tx-16,th);
+    if (self.subtitleLabel) self.subtitleLabel.frame=CGRectMake(tx,ty+th+1,W-tx-16,16);
+    self.separator.frame=CGRectMake(tx,H-0.5,W-tx,0.5);
+}
+@end
+
+@interface ZBPanel : UIView
+@property (nonatomic, copy) void(^onBackup)(void);
+@property (nonatomic, copy) void(^onRestore)(void);
+@property (nonatomic, copy) void(^onAutoBackup)(void);
+@property (nonatomic, copy) void(^onClose)(void);
+- (void)updateState;
+@end
+@implementation ZBPanel {
+    UIView *_bg;
+    UILabel *_titleLbl;
+    UILabel *_statusLbl;
+    ZBPanelRow *_backupRow;
+    ZBPanelRow *_restoreRow;
+    ZBPanelRow *_autoRow;
+    ZBPanelRow *_closeRow;
+}
+- (instancetype)init {
+    self=[super init];
+    self.backgroundColor=UIColor.clearColor;
+    // Blur background
+    UIBlurEffect *blur=[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial];
+    UIVisualEffectView *blurV=[[UIVisualEffectView alloc] initWithEffect:blur];
+    blurV.layer.cornerRadius=16;
+    blurV.clipsToBounds=YES;
+    blurV.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    [self addSubview:blurV];
+    _bg=blurV;
+
+    // Title bar
+    UIView *titleBar=[[UIView alloc] initWithFrame:CGRectMake(0,0,260,52)];
+    titleBar.backgroundColor=UIColor.clearColor;
+    [blurV.contentView addSubview:titleBar];
+
+    // Icon tren title
+    UILabel *appIcon=[UILabel new];
+    appIcon.text=@"🔐";
+    appIcon.font=[UIFont systemFontOfSize:20];
+    appIcon.frame=CGRectMake(16,12,30,28);
+    [titleBar addSubview:appIcon];
+
+    _titleLbl=[UILabel new];
+    _titleLbl.text=@"ZaloBackup Pro";
+    _titleLbl.font=[UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    _titleLbl.textColor=[UIColor labelColor];
+    _titleLbl.frame=CGRectMake(50,8,160,20);
+    [titleBar addSubview:_titleLbl];
+
+    _statusLbl=[UILabel new];
+    _statusLbl.font=[UIFont systemFontOfSize:11];
+    _statusLbl.textColor=[UIColor secondaryLabelColor];
+    _statusLbl.frame=CGRectMake(50,28,160,16);
+    [titleBar addSubview:_statusLbl];
+
+    // Duong ke ngang
+    UIView *div=[[UIView alloc] initWithFrame:CGRectMake(0,52,260,0.5)];
+    div.backgroundColor=[UIColor separatorColor];
+    [blurV.contentView addSubview:div];
+
+    // Rows
+    _backupRow=[[ZBPanelRow alloc] initWithIcon:@"📦" title:@"Backup" subtitle:@"Luu du lieu ra file .zip"];
+    _restoreRow=[[ZBPanelRow alloc] initWithIcon:@"🔄" title:@"Restore" subtitle:@"Khoi phuc tu file .zip"];
+    _autoRow=[[ZBPanelRow alloc] initWithIcon:@"⏱" title:@"Auto Backup" subtitle:@"Chua bat"];
+    _closeRow=[[ZBPanelRow alloc] initWithIcon:@"✕" title:@"Dong" subtitle:nil];
+    _closeRow.titleLabel.textColor=[UIColor systemRedColor];
+
+    for (ZBPanelRow *r in @[_backupRow,_restoreRow,_autoRow,_closeRow])
+        [blurV.contentView addSubview:r];
+
+    [_backupRow addTarget:self action:@selector(tapBackup) forControlEvents:UIControlEventTouchUpInside];
+    [_restoreRow addTarget:self action:@selector(tapRestore) forControlEvents:UIControlEventTouchUpInside];
+    [_autoRow addTarget:self action:@selector(tapAuto) forControlEvents:UIControlEventTouchUpInside];
+    [_closeRow addTarget:self action:@selector(tapClose) forControlEvents:UIControlEventTouchUpInside];
+
+    self.layer.shadowColor=UIColor.blackColor.CGColor;
+    self.layer.shadowOpacity=0.18;
+    self.layer.shadowRadius=20;
+    self.layer.shadowOffset=CGSizeMake(0,4);
+
+    [self updateState];
+    return self;
+}
+- (void)updateState {
+    ZBManager *m=[ZBManager shared];
+    if (m.busy) {
+        _statusLbl.text=@"Dang xu ly...";
+        _statusLbl.textColor=[UIColor systemOrangeColor];
+    } else if (m.autoTimer) {
+        _statusLbl.text=[NSString stringWithFormat:@"Auto: moi %ldh",(long)m.autoHours];
+        _statusLbl.textColor=[UIColor systemGreenColor];
+        _autoRow.subtitleLabel.text=[NSString stringWithFormat:@"Dang chay • moi %ldh",(long)m.autoHours];
+        _autoRow.iconLabel.text=@"⏱";
+    } else {
+        _statusLbl.text=@"San sang";
+        _statusLbl.textColor=[UIColor secondaryLabelColor];
+        _autoRow.subtitleLabel.text=@"Chua bat";
+    }
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    _bg.frame=self.bounds;
+    CGFloat W=260, rowH=56;
+    NSArray *rows=@[_backupRow,_restoreRow,_autoRow,_closeRow];
+    for (int i=0;i<rows.count;i++)
+        [rows[i] setFrame:CGRectMake(0,52+i*rowH,W,rowH)];
+    // An separator dong cuoi
+    _closeRow.separator.hidden=YES;
+}
+- (void)tapBackup { if(self.onBackup) self.onBackup(); }
+- (void)tapRestore { if(self.onRestore) self.onRestore(); }
+- (void)tapAuto { if(self.onAutoBackup) self.onAutoBackup(); }
+- (void)tapClose { if(self.onClose) self.onClose(); }
+@end
+
+// ============================================================
+// ZBRootVC + ZBWindow
 // ============================================================
 @interface ZBRootVC : UIViewController @end
 @implementation ZBRootVC
@@ -248,89 +398,160 @@
 
 @interface ZBWindow : UIWindow
 @property (nonatomic, strong) UIButton *btn;
+@property (nonatomic, strong) UIView *badgeView;
 @property (nonatomic, strong) ZBRootVC *rootVC;
+@property (nonatomic, strong) ZBPanel *panel;
+@property (nonatomic, assign) BOOL panelShown;
 @end
 
 @implementation ZBWindow
 - (instancetype)initWithWindowScene:(UIWindowScene *)scene {
-    self = [super initWithWindowScene:scene];
+    self=[super initWithWindowScene:scene];
     if (!self) return nil;
-    self.frame = scene.coordinateSpace.bounds;
-    self.windowLevel = UIWindowLevelNormal + 1;
-    self.backgroundColor = UIColor.clearColor;
-    self.rootVC = [ZBRootVC new];
-    self.rootViewController = self.rootVC;
-    self.hidden = NO;
+    self.frame=scene.coordinateSpace.bounds;
+    self.windowLevel=UIWindowLevelNormal+1;
+    self.backgroundColor=UIColor.clearColor;
+    self.rootVC=[ZBRootVC new];
+    self.rootViewController=self.rootVC;
+    self.hidden=NO;
 
-    self.btn = [UIButton buttonWithType:UIButtonTypeCustom];
-    CGRect screen = UIScreen.mainScreen.bounds;
-    self.btn.frame = CGRectMake(screen.size.width-78, screen.size.height*0.55, 62, 62);
-    self.btn.backgroundColor = [UIColor colorWithRed:0 green:0.47 blue:1 alpha:0.88];
-    self.btn.layer.cornerRadius = 31;
-    self.btn.layer.borderWidth = 2;
-    self.btn.layer.borderColor = UIColor.whiteColor.CGColor;
-    self.btn.layer.shadowColor = UIColor.blackColor.CGColor;
-    self.btn.layer.shadowOpacity = 0.35;
-    self.btn.layer.shadowOffset = CGSizeMake(0,3);
-    [self.btn setTitle:@"ZPRO" forState:UIControlStateNormal];
-    self.btn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-    [self.btn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    CGRect screen=UIScreen.mainScreen.bounds;
+
+    // Main button - tron, blur style
+    self.btn=[UIButton buttonWithType:UIButtonTypeCustom];
+    self.btn.frame=CGRectMake(screen.size.width-74, screen.size.height*0.52, 58, 58);
+
+    // Blur effect cho nut
+    UIBlurEffect *blur=[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+    UIVisualEffectView *blurBtn=[[UIVisualEffectView alloc] initWithEffect:blur];
+    blurBtn.frame=CGRectMake(0,0,58,58);
+    blurBtn.layer.cornerRadius=29;
+    blurBtn.clipsToBounds=YES;
+    blurBtn.userInteractionEnabled=NO;
+    [self.btn addSubview:blurBtn];
+
+    // Icon
+    UILabel *icon=[UILabel new];
+    icon.text=@"🔐";
+    icon.font=[UIFont systemFontOfSize:24];
+    icon.textAlignment=NSTextAlignmentCenter;
+    icon.frame=CGRectMake(0,0,58,58);
+    icon.userInteractionEnabled=NO;
+    [self.btn addSubview:icon];
+
+    self.btn.layer.cornerRadius=29;
+    self.btn.layer.shadowColor=UIColor.blackColor.CGColor;
+    self.btn.layer.shadowOpacity=0.25;
+    self.btn.layer.shadowRadius=8;
+    self.btn.layer.shadowOffset=CGSizeMake(0,3);
+
     [self.btn addTarget:self action:@selector(btnTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.btn addTarget:self action:@selector(btnHighlight) forControlEvents:UIControlEventTouchDown];
+    [self.btn addTarget:self action:@selector(btnUnhighlight) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
+
     UIPanGestureRecognizer *pan=[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(pan:)];
     [self.btn addGestureRecognizer:pan];
     [self.rootVC.view addSubview:self.btn];
+
+    // Badge dot (auto backup indicator)
+    self.badgeView=[[UIView alloc] initWithFrame:CGRectMake(40,2,14,14)];
+    self.badgeView.backgroundColor=[UIColor systemGreenColor];
+    self.badgeView.layer.cornerRadius=7;
+    self.badgeView.layer.borderWidth=2;
+    self.badgeView.layer.borderColor=UIColor.whiteColor.CGColor;
+    self.badgeView.hidden=YES;
+    [self.btn addSubview:self.badgeView];
+
+    // Panel
+    self.panel=[[ZBPanel alloc] initWithFrame:CGRectMake(0,0,260,52+56*4)];
+    self.panel.alpha=0;
+    self.panel.transform=CGAffineTransformMakeScale(0.85,0.85);
+    self.panel.hidden=YES;
+    [self.rootVC.view addSubview:self.panel];
+
+    __weak ZBWindow *ws=self;
+    self.panel.onBackup=^{
+        [ws dismissPanel];
+        [[ZBManager shared] backupFrom:ws.rootVC silent:NO];
+    };
+    self.panel.onRestore=^{
+        [ws dismissPanel];
+        [[ZBManager shared] restoreFrom:ws.rootVC];
+    };
+    self.panel.onAutoBackup=^{ [ws handleAutoBackup]; };
+    self.panel.onClose=^{ [ws dismissPanel]; };
+
+    [ZBManager shared].onStateChange=^{
+        dispatch_async(dispatch_get_main_queue(),^{
+            [ws.panel updateState];
+            ws.badgeView.hidden=![ZBManager shared].autoTimer;
+        });
+    };
+
     return self;
 }
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    CGPoint p=[self.rootVC.view convertPoint:point fromView:self];
-    if (CGRectContainsPoint(self.btn.frame,p)) return self.btn;
-    if (self.rootVC.presentedViewController) return [super hitTest:point withEvent:event];
-    return nil;
-}
-- (void)btnTapped {
-    ZBManager *mgr=[ZBManager shared];
-    NSString *autoTitle = mgr.autoTimer
-        ? [NSString stringWithFormat:@"Dung Auto Backup (%ldh)",(long)mgr.autoHours]
-        : @"Bat Auto Backup...";
 
-    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"ZaloBackup Pro"
-        message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    [menu addAction:[UIAlertAction actionWithTitle:@"Backup" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_){
-        [[ZBManager shared] backupFrom:self.rootVC silent:NO];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_){
-        [[ZBManager shared] restoreFrom:self.rootVC];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:autoTitle style:UIAlertActionStyleDefault handler:^(UIAlertAction *_){
-        if (mgr.autoTimer) {
-            [mgr stopAutoBackup];
-            UIAlertController *done=[UIAlertController alertControllerWithTitle:@"Da Tat Auto Backup" message:nil preferredStyle:UIAlertControllerStyleAlert];
-            [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-            [self.rootVC presentViewController:done animated:YES completion:nil];
-        } else {
-            [self showAutoBackupPicker];
-        }
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"Dong" style:UIAlertActionStyleCancel handler:nil]];
-    if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad)
-        menu.popoverPresentationController.sourceView=self.btn;
-    [self.rootVC presentViewController:menu animated:YES completion:nil];
+- (void)btnHighlight {
+    [UIView animateWithDuration:0.1 animations:^{
+        self.btn.transform=CGAffineTransformMakeScale(0.92,0.92);
+    }];
 }
-- (void)showAutoBackupPicker {
-    UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Auto Backup Moi Bao Lau?"
-        message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+- (void)btnUnhighlight {
+    [UIView animateWithDuration:0.15 delay:0 usingSpringWithDamping:0.6 initialSpringVelocity:0.5 options:0 animations:^{
+        self.btn.transform=CGAffineTransformIdentity;
+    } completion:nil];
+}
+
+- (void)btnTapped {
+    if (self.panelShown) { [self dismissPanel]; return; }
+    [self showPanel];
+}
+
+- (void)showPanel {
+    self.panelShown=YES;
+    [self.panel updateState];
+    // Posisi panel
+    CGRect bf=self.btn.frame;
+    CGRect bounds=self.rootVC.view.bounds;
+    CGFloat px=bf.origin.x-270;
+    if (px<8) px=bf.origin.x+bf.size.width+8;
+    CGFloat py=bf.origin.y;
+    if (py+self.panel.bounds.size.height>bounds.size.height-20)
+        py=bounds.size.height-self.panel.bounds.size.height-20;
+    self.panel.frame=CGRectMake(px,py,260,52+56*4);
+    self.panel.hidden=NO;
+    [self.rootVC.view bringSubviewToFront:self.panel];
+    [UIView animateWithDuration:0.3 delay:0 usingSpringWithDamping:0.75 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        self.panel.alpha=1;
+        self.panel.transform=CGAffineTransformIdentity;
+    } completion:nil];
+}
+
+- (void)dismissPanel {
+    self.panelShown=NO;
+    [UIView animateWithDuration:0.2 animations:^{
+        self.panel.alpha=0;
+        self.panel.transform=CGAffineTransformMakeScale(0.9,0.9);
+    } completion:^(BOOL f){ self.panel.hidden=YES; self.panel.transform=CGAffineTransformMakeScale(0.85,0.85); }];
+}
+
+- (void)handleAutoBackup {
+    ZBManager *mgr=[ZBManager shared];
+    if (mgr.autoTimer) {
+        [mgr stopAutoBackup];
+        [self.panel updateState];
+        return;
+    }
+    // Chon tan suat
+    UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Auto Backup"
+        message:@"Tu dong backup moi bao lau?" preferredStyle:UIAlertControllerStyleActionSheet];
     NSArray *opts=@[@"1 gio",@"2 gio",@"4 gio",@"6 gio",@"12 gio",@"24 gio"];
     NSArray *vals=@[@1,@2,@4,@6,@12,@24];
     for (int i=0;i<opts.count;i++) {
-        NSInteger h=[vals[i] integerValue];
-        NSString *t=opts[i];
+        NSInteger h=[vals[i] integerValue]; NSString *t=opts[i];
         [ac addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction *_){
-            [[ZBManager shared] startAutoBackup:h vc:self.rootVC];
-            UIAlertController *done=[UIAlertController alertControllerWithTitle:@"Auto Backup Bat"
-                message:[NSString stringWithFormat:@"Se tu dong backup moi %@ va luu vao Documents.",t]
-                preferredStyle:UIAlertControllerStyleAlert];
-            [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-            [self.rootVC presentViewController:done animated:YES completion:nil];
+            [mgr startAutoBackup:h vc:self.rootVC];
+            [self.panel updateState];
         }]];
     }
     [ac addAction:[UIAlertAction actionWithTitle:@"Huy" style:UIAlertActionStyleCancel handler:nil]];
@@ -338,6 +559,16 @@
         ac.popoverPresentationController.sourceView=self.btn;
     [self.rootVC presentViewController:ac animated:YES completion:nil];
 }
+
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    CGPoint p=[self.rootVC.view convertPoint:point fromView:self];
+    if (!self.panel.hidden && CGRectContainsPoint(self.panel.frame,p))
+        return [super hitTest:point withEvent:event];
+    if (CGRectContainsPoint(self.btn.frame,p)) return self.btn;
+    if (self.rootVC.presentedViewController) return [super hitTest:point withEvent:event];
+    return nil;
+}
+
 - (void)pan:(UIPanGestureRecognizer *)p {
     CGPoint t=[p translationInView:self.rootVC.view];
     CGRect f=self.btn.frame, b=self.rootVC.view.bounds;
