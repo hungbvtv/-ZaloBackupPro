@@ -22,7 +22,9 @@ jobs:
             -framework CoreGraphics \
             -framework UniformTypeIdentifiers \
             -mios-version-min=13.0 \
+            -fobjc-arc \
             -dynamiclib \
+            -lz \
             -o ZaloBackupPro.dylib \
             ZaloBackupPro.m
 
