@@ -142,8 +142,7 @@
     if (self.busy) return; self.pendingVC=vc;
     UIDocumentPickerViewController *picker;
     if (@available(iOS 14.0,*)) {
-        UTType *t=[UTType typeWithFilenameExtension:@"zbak"];
-        picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:t?@[t]:@[UTTypeData] asCopy:YES];
+        picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];
     } else {
         picker=[[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data"] inMode:UIDocumentPickerModeImport];
     }
