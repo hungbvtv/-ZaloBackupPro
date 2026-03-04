@@ -5,13 +5,6 @@
 
 #define ZB_CHUNK 16384
 
-// ============================================================
-// ZaloBackup Pro - iOS Native Style
-// - Nut tron dep, icon + badge trang thai auto backup
-// - Menu custom panel (khong dung ActionSheet)
-// - Animation muot
-// ============================================================
-
 @interface ZBZip : NSObject
 + (BOOL)zipFiles:(NSArray<NSDictionary *> *)files toPath:(NSString *)zipPath;
 + (NSDictionary *)unzipFile:(NSString *)zipPath;
@@ -82,7 +75,6 @@
 }
 @end
 
-// ============================================================
 @interface ZBManager : NSObject <UIDocumentPickerDelegate>
 + (instancetype)shared;
 - (void)backupFrom:(UIViewController *)vc silent:(BOOL)silent;
@@ -144,14 +136,7 @@
         dispatch_async(dispatch_get_main_queue(),^{
             self.busy=NO;
             if (self.onStateChange) self.onStateChange();
-            if (!ok) {
-                if (!silent) {
-                    UIAlertController *err=[UIAlertController alertControllerWithTitle:@"Loi" message:@"Khong the tao file backup." preferredStyle:UIAlertControllerStyleAlert];
-                    [err addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                    [[self topVC:vc] presentViewController:err animated:YES completion:nil];
-                }
-                return;
-            }
+            if (!ok) { return; }
             if (silent) {
                 NSString *docs=[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES) firstObject];
                 NSString *dest=[docs stringByAppendingPathComponent:fname];
@@ -168,8 +153,7 @@
 }
 - (void)startAutoBackup:(NSInteger)hours vc:(UIViewController *)vc {
     [self stopAutoBackup];
-    self.autoHours=hours;
-    self.pendingVC=vc;
+    self.autoHours=hours; self.pendingVC=vc;
     [self backupFrom:vc silent:YES];
     self.autoTimer=[NSTimer scheduledTimerWithTimeInterval:hours*3600 target:self selector:@selector(autoFire) userInfo:nil repeats:YES];
     if (self.onStateChange) self.onStateChange();
@@ -189,7 +173,7 @@
     NSURL *url=urls.firstObject; if (!url) return;
     UIViewController *vc=self.pendingVC;
     UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Xac nhan khoi phuc"
-        message:[NSString stringWithFormat:@"%@\n\nDu lieu se bi ghi de. App tu dong sau khi xong.",url.lastPathComponent]
+        message:[NSString stringWithFormat:@"%@\nDu lieu se bi ghi de. App tu dong sau khi xong.",url.lastPathComponent]
         preferredStyle:UIAlertControllerStyleAlert];
     [ac addAction:[UIAlertAction actionWithTitle:@"Khoi Phuc" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_){
         self.busy=YES;
@@ -219,177 +203,7 @@
 @end
 
 // ============================================================
-// ZBPanel - Custom menu panel iOS style
-// ============================================================
-@interface ZBPanelRow : UIControl
-@property (nonatomic, strong) UILabel *iconLabel;
-@property (nonatomic, strong) UILabel *titleLabel;
-@property (nonatomic, strong) UILabel *subtitleLabel;
-@property (nonatomic, strong) UIView *separator;
-- (instancetype)initWithIcon:(NSString*)icon title:(NSString*)title subtitle:(NSString*)sub;
-@end
-@implementation ZBPanelRow
-- (instancetype)initWithIcon:(NSString*)icon title:(NSString*)title subtitle:(NSString*)sub {
-    self=[super init];
-    self.backgroundColor=UIColor.clearColor;
-    // Icon
-    self.iconLabel=[UILabel new];
-    self.iconLabel.text=icon;
-    self.iconLabel.font=[UIFont systemFontOfSize:22];
-    self.iconLabel.textAlignment=NSTextAlignmentCenter;
-    [self addSubview:self.iconLabel];
-    // Title
-    self.titleLabel=[UILabel new];
-    self.titleLabel.text=title;
-    self.titleLabel.font=[UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
-    self.titleLabel.textColor=[UIColor labelColor];
-    [self addSubview:self.titleLabel];
-    // Subtitle
-    if (sub.length) {
-        self.subtitleLabel=[UILabel new];
-        self.subtitleLabel.text=sub;
-        self.subtitleLabel.font=[UIFont systemFontOfSize:12];
-        self.subtitleLabel.textColor=[UIColor secondaryLabelColor];
-        [self addSubview:self.subtitleLabel];
-    }
-    // Separator
-    self.separator=[[UIView alloc] init];
-    self.separator.backgroundColor=[UIColor separatorColor];
-    [self addSubview:self.separator];
-    // Highlight
-    [self addTarget:self action:@selector(highlight) forControlEvents:UIControlEventTouchDown|UIControlEventTouchDragEnter];
-    [self addTarget:self action:@selector(unhighlight) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchDragExit|UIControlEventTouchCancel];
-    return self;
-}
-- (void)highlight { [UIView animateWithDuration:0.1 animations:^{ self.backgroundColor=[UIColor colorWithWhite:0.5 alpha:0.12]; }]; }
-- (void)unhighlight { [UIView animateWithDuration:0.2 animations:^{ self.backgroundColor=UIColor.clearColor; }]; }
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    CGFloat W=self.bounds.size.width, H=self.bounds.size.height;
-    self.iconLabel.frame=CGRectMake(16,0,36,H);
-    CGFloat tx=62, th=self.subtitleLabel?20:H;
-    CGFloat ty=self.subtitleLabel?(H/2-th):0;
-    self.titleLabel.frame=CGRectMake(tx,ty,W-tx-16,th);
-    if (self.subtitleLabel) self.subtitleLabel.frame=CGRectMake(tx,ty+th+1,W-tx-16,16);
-    self.separator.frame=CGRectMake(tx,H-0.5,W-tx,0.5);
-}
-@end
-
-@interface ZBPanel : UIView
-@property (nonatomic, copy) void(^onBackup)(void);
-@property (nonatomic, copy) void(^onRestore)(void);
-@property (nonatomic, copy) void(^onAutoBackup)(void);
-@property (nonatomic, copy) void(^onClose)(void);
-- (void)updateState;
-@end
-@implementation ZBPanel {
-    UIView *_bg;
-    UILabel *_titleLbl;
-    UILabel *_statusLbl;
-    ZBPanelRow *_backupRow;
-    ZBPanelRow *_restoreRow;
-    ZBPanelRow *_autoRow;
-    ZBPanelRow *_closeRow;
-}
-- (instancetype)init {
-    self=[super init];
-    self.backgroundColor=UIColor.clearColor;
-    // Blur background
-    UIBlurEffect *blur=[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial];
-    UIVisualEffectView *blurV=[[UIVisualEffectView alloc] initWithEffect:blur];
-    blurV.layer.cornerRadius=16;
-    blurV.clipsToBounds=YES;
-    blurV.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
-    [self addSubview:blurV];
-    _bg=blurV;
-
-    // Title bar
-    UIView *titleBar=[[UIView alloc] initWithFrame:CGRectMake(0,0,260,52)];
-    titleBar.backgroundColor=UIColor.clearColor;
-    [blurV.contentView addSubview:titleBar];
-
-    // Icon tren title
-    UILabel *appIcon=[UILabel new];
-    appIcon.text=@"🔐";
-    appIcon.font=[UIFont systemFontOfSize:20];
-    appIcon.frame=CGRectMake(16,12,30,28);
-    [titleBar addSubview:appIcon];
-
-    _titleLbl=[UILabel new];
-    _titleLbl.text=@"ZaloBackup Pro";
-    _titleLbl.font=[UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    _titleLbl.textColor=[UIColor labelColor];
-    _titleLbl.frame=CGRectMake(50,8,160,20);
-    [titleBar addSubview:_titleLbl];
-
-    _statusLbl=[UILabel new];
-    _statusLbl.font=[UIFont systemFontOfSize:11];
-    _statusLbl.textColor=[UIColor secondaryLabelColor];
-    _statusLbl.frame=CGRectMake(50,28,160,16);
-    [titleBar addSubview:_statusLbl];
-
-    // Duong ke ngang
-    UIView *div=[[UIView alloc] initWithFrame:CGRectMake(0,52,260,0.5)];
-    div.backgroundColor=[UIColor separatorColor];
-    [blurV.contentView addSubview:div];
-
-    // Rows
-    _backupRow=[[ZBPanelRow alloc] initWithIcon:@"📦" title:@"Backup" subtitle:@"Luu du lieu ra file .zip"];
-    _restoreRow=[[ZBPanelRow alloc] initWithIcon:@"🔄" title:@"Restore" subtitle:@"Khoi phuc tu file .zip"];
-    _autoRow=[[ZBPanelRow alloc] initWithIcon:@"⏱" title:@"Auto Backup" subtitle:@"Chua bat"];
-    _closeRow=[[ZBPanelRow alloc] initWithIcon:@"✕" title:@"Dong" subtitle:nil];
-    _closeRow.titleLabel.textColor=[UIColor systemRedColor];
-
-    for (ZBPanelRow *r in @[_backupRow,_restoreRow,_autoRow,_closeRow])
-        [blurV.contentView addSubview:r];
-
-    [_backupRow addTarget:self action:@selector(tapBackup) forControlEvents:UIControlEventTouchUpInside];
-    [_restoreRow addTarget:self action:@selector(tapRestore) forControlEvents:UIControlEventTouchUpInside];
-    [_autoRow addTarget:self action:@selector(tapAuto) forControlEvents:UIControlEventTouchUpInside];
-    [_closeRow addTarget:self action:@selector(tapClose) forControlEvents:UIControlEventTouchUpInside];
-
-    self.layer.shadowColor=UIColor.blackColor.CGColor;
-    self.layer.shadowOpacity=0.18;
-    self.layer.shadowRadius=20;
-    self.layer.shadowOffset=CGSizeMake(0,4);
-
-    [self updateState];
-    return self;
-}
-- (void)updateState {
-    ZBManager *m=[ZBManager shared];
-    if (m.busy) {
-        _statusLbl.text=@"Dang xu ly...";
-        _statusLbl.textColor=[UIColor systemOrangeColor];
-    } else if (m.autoTimer) {
-        _statusLbl.text=[NSString stringWithFormat:@"Auto: moi %ldh",(long)m.autoHours];
-        _statusLbl.textColor=[UIColor systemGreenColor];
-        _autoRow.subtitleLabel.text=[NSString stringWithFormat:@"Dang chay • moi %ldh",(long)m.autoHours];
-        _autoRow.iconLabel.text=@"⏱";
-    } else {
-        _statusLbl.text=@"San sang";
-        _statusLbl.textColor=[UIColor secondaryLabelColor];
-        _autoRow.subtitleLabel.text=@"Chua bat";
-    }
-}
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    _bg.frame=self.bounds;
-    CGFloat W=260, rowH=56;
-    NSArray *rows=@[_backupRow,_restoreRow,_autoRow,_closeRow];
-    for (int i=0;i<rows.count;i++)
-        [rows[i] setFrame:CGRectMake(0,52+i*rowH,W,rowH)];
-    // An separator dong cuoi
-    _closeRow.separator.hidden=YES;
-}
-- (void)tapBackup { if(self.onBackup) self.onBackup(); }
-- (void)tapRestore { if(self.onRestore) self.onRestore(); }
-- (void)tapAuto { if(self.onAutoBackup) self.onAutoBackup(); }
-- (void)tapClose { if(self.onClose) self.onClose(); }
-@end
-
-// ============================================================
-// ZBRootVC + ZBWindow
+// ZBRootVC + ZBWindow - simple, no blur, iOS native colors
 // ============================================================
 @interface ZBRootVC : UIViewController @end
 @implementation ZBRootVC
@@ -398,13 +212,15 @@
 
 @interface ZBWindow : UIWindow
 @property (nonatomic, strong) UIButton *btn;
-@property (nonatomic, strong) UIView *badgeView;
-@property (nonatomic, strong) ZBRootVC *rootVC;
-@property (nonatomic, strong) ZBPanel *panel;
+@property (nonatomic, strong) UIView *badgeDot;
+@property (nonatomic, strong) UIView *panel;
+@property (nonatomic, strong) UILabel *statusLbl;
 @property (nonatomic, assign) BOOL panelShown;
+@property (nonatomic, strong) ZBRootVC *rootVC;
 @end
 
 @implementation ZBWindow
+
 - (instancetype)initWithWindowScene:(UIWindowScene *)scene {
     self=[super initWithWindowScene:scene];
     if (!self) return nil;
@@ -417,132 +233,172 @@
 
     CGRect screen=UIScreen.mainScreen.bounds;
 
-    // Main button - tron, blur style
+    // --- Floating Button ---
     self.btn=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.btn.frame=CGRectMake(screen.size.width-74, screen.size.height*0.52, 58, 58);
-
-    // Blur effect cho nut
-    UIBlurEffect *blur=[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-    UIVisualEffectView *blurBtn=[[UIVisualEffectView alloc] initWithEffect:blur];
-    blurBtn.frame=CGRectMake(0,0,58,58);
-    blurBtn.layer.cornerRadius=29;
-    blurBtn.clipsToBounds=YES;
-    blurBtn.userInteractionEnabled=NO;
-    [self.btn addSubview:blurBtn];
-
-    // Icon
-    UILabel *icon=[UILabel new];
-    icon.text=@"🔐";
-    icon.font=[UIFont systemFontOfSize:24];
-    icon.textAlignment=NSTextAlignmentCenter;
-    icon.frame=CGRectMake(0,0,58,58);
-    icon.userInteractionEnabled=NO;
-    [self.btn addSubview:icon];
-
-    self.btn.layer.cornerRadius=29;
+    self.btn.frame=CGRectMake(screen.size.width-70, screen.size.height*0.52, 56, 56);
+    self.btn.backgroundColor=[UIColor colorWithRed:0.11 green:0.11 blue:0.12 alpha:0.88];
+    self.btn.layer.cornerRadius=28;
+    self.btn.layer.borderWidth=1.5;
+    self.btn.layer.borderColor=[UIColor colorWithWhite:1 alpha:0.2].CGColor;
     self.btn.layer.shadowColor=UIColor.blackColor.CGColor;
-    self.btn.layer.shadowOpacity=0.25;
+    self.btn.layer.shadowOpacity=0.3;
     self.btn.layer.shadowRadius=8;
-    self.btn.layer.shadowOffset=CGSizeMake(0,3);
-
+    self.btn.layer.shadowOffset=CGSizeMake(0,4);
+    [self.btn setTitle:@"🔐" forState:UIControlStateNormal];
+    self.btn.titleLabel.font=[UIFont systemFontOfSize:24];
     [self.btn addTarget:self action:@selector(btnTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.btn addTarget:self action:@selector(btnHighlight) forControlEvents:UIControlEventTouchDown];
-    [self.btn addTarget:self action:@selector(btnUnhighlight) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
-
+    [self.btn addTarget:self action:@selector(btnDown) forControlEvents:UIControlEventTouchDown];
+    [self.btn addTarget:self action:@selector(btnUp) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
     UIPanGestureRecognizer *pan=[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(pan:)];
     [self.btn addGestureRecognizer:pan];
     [self.rootVC.view addSubview:self.btn];
 
-    // Badge dot (auto backup indicator)
-    self.badgeView=[[UIView alloc] initWithFrame:CGRectMake(40,2,14,14)];
-    self.badgeView.backgroundColor=[UIColor systemGreenColor];
-    self.badgeView.layer.cornerRadius=7;
-    self.badgeView.layer.borderWidth=2;
-    self.badgeView.layer.borderColor=UIColor.whiteColor.CGColor;
-    self.badgeView.hidden=YES;
-    [self.btn addSubview:self.badgeView];
+    // Badge dot
+    self.badgeDot=[[UIView alloc] initWithFrame:CGRectMake(38,2,13,13)];
+    self.badgeDot.backgroundColor=[UIColor colorWithRed:0.2 green:0.85 blue:0.4 alpha:1];
+    self.badgeDot.layer.cornerRadius=6.5;
+    self.badgeDot.layer.borderWidth=2;
+    self.badgeDot.layer.borderColor=[UIColor colorWithWhite:0.12 alpha:1].CGColor;
+    self.badgeDot.hidden=YES;
+    [self.btn addSubview:self.badgeDot];
 
-    // Panel
-    self.panel=[[ZBPanel alloc] initWithFrame:CGRectMake(0,0,260,52+56*4)];
-    self.panel.alpha=0;
-    self.panel.transform=CGAffineTransformMakeScale(0.85,0.85);
-    self.panel.hidden=YES;
-    [self.rootVC.view addSubview:self.panel];
+    // --- Panel ---
+    [self buildPanel];
 
+    // State change callback
     __weak ZBWindow *ws=self;
-    self.panel.onBackup=^{
-        [ws dismissPanel];
-        [[ZBManager shared] backupFrom:ws.rootVC silent:NO];
-    };
-    self.panel.onRestore=^{
-        [ws dismissPanel];
-        [[ZBManager shared] restoreFrom:ws.rootVC];
-    };
-    self.panel.onAutoBackup=^{ [ws handleAutoBackup]; };
-    self.panel.onClose=^{ [ws dismissPanel]; };
-
     [ZBManager shared].onStateChange=^{
-        dispatch_async(dispatch_get_main_queue(),^{
-            [ws.panel updateState];
-            ws.badgeView.hidden=![ZBManager shared].autoTimer;
-        });
+        dispatch_async(dispatch_get_main_queue(),^{ [ws updateUI]; });
     };
 
     return self;
 }
 
-- (void)btnHighlight {
-    [UIView animateWithDuration:0.1 animations:^{
-        self.btn.transform=CGAffineTransformMakeScale(0.92,0.92);
+- (void)buildPanel {
+    CGFloat W=240, rowH=52, headerH=54;
+    NSInteger rows=4;
+    CGFloat H=headerH+rowH*rows;
+
+    self.panel=[[UIView alloc] initWithFrame:CGRectMake(0,0,W,H)];
+    self.panel.backgroundColor=[UIColor colorWithRed:0.11 green:0.11 blue:0.12 alpha:0.96];
+    self.panel.layer.cornerRadius=16;
+    self.panel.layer.borderWidth=1;
+    self.panel.layer.borderColor=[UIColor colorWithWhite:1 alpha:0.1].CGColor;
+    self.panel.layer.shadowColor=UIColor.blackColor.CGColor;
+    self.panel.layer.shadowOpacity=0.35;
+    self.panel.layer.shadowRadius=20;
+    self.panel.layer.shadowOffset=CGSizeMake(0,6);
+    self.panel.alpha=0;
+    self.panel.hidden=YES;
+    self.panel.clipsToBounds=NO;
+
+    // Header
+    UILabel *titleIcon=[UILabel new];
+    titleIcon.text=@"🔐";
+    titleIcon.font=[UIFont systemFontOfSize:18];
+    titleIcon.frame=CGRectMake(14,14,28,26);
+    [self.panel addSubview:titleIcon];
+
+    UILabel *titleLbl=[UILabel new];
+    titleLbl.text=@"ZaloBackup Pro";
+    titleLbl.font=[UIFont boldSystemFontOfSize:14];
+    titleLbl.textColor=[UIColor whiteColor];
+    titleLbl.frame=CGRectMake(46,10,W-60,20);
+    [self.panel addSubview:titleLbl];
+
+    self.statusLbl=[UILabel new];
+    self.statusLbl.text=@"San sang";
+    self.statusLbl.font=[UIFont systemFontOfSize:11];
+    self.statusLbl.textColor=[UIColor colorWithWhite:0.5 alpha:1];
+    self.statusLbl.frame=CGRectMake(46,30,W-60,16);
+    [self.panel addSubview:self.statusLbl];
+
+    // Divider
+    UIView *div=[[UIView alloc] initWithFrame:CGRectMake(0,headerH,W,0.5)];
+    div.backgroundColor=[UIColor colorWithWhite:1 alpha:0.08];
+    [self.panel addSubview:div];
+
+    // Rows data: icon, title, tag
+    NSArray *rowData=@[
+        @{@"icon":@"📦",@"title":@"Backup",@"tag":@1},
+        @{@"icon":@"🔄",@"title":@"Restore",@"tag":@2},
+        @{@"icon":@"⏱",@"title":@"Auto Backup",@"tag":@3},
+        @{@"icon":@"✕",@"title":@"Dong",@"tag":@4},
+    ];
+    for (int i=0;i<rowData.count;i++) {
+        NSDictionary *rd=rowData[i];
+        UIButton *row=[UIButton buttonWithType:UIButtonTypeCustom];
+        row.frame=CGRectMake(0,headerH+i*rowH,W,rowH);
+        row.backgroundColor=UIColor.clearColor;
+        row.tag=[rd[@"tag"] integerValue];
+        [row addTarget:self action:@selector(rowTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [row addTarget:self action:@selector(rowDown:) forControlEvents:UIControlEventTouchDown];
+        [row addTarget:self action:@selector(rowUp:) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
+
+        UILabel *iconL=[UILabel new];
+        iconL.text=rd[@"icon"];
+        iconL.font=[UIFont systemFontOfSize:20];
+        iconL.frame=CGRectMake(14,0,32,rowH);
+        iconL.userInteractionEnabled=NO;
+        [row addSubview:iconL];
+
+        UILabel *titleL=[UILabel new];
+        titleL.text=rd[@"title"];
+        titleL.font=[UIFont systemFontOfSize:15];
+        titleL.textColor=[rd[@"tag"] integerValue]==4?[UIColor colorWithRed:1 green:0.3 blue:0.3 alpha:1]:[UIColor whiteColor];
+        titleL.frame=CGRectMake(54,0,W-70,rowH);
+        titleL.userInteractionEnabled=NO;
+        [row addSubview:titleL];
+
+        if (i<rowData.count-1) {
+            UIView *sep=[[UIView alloc] initWithFrame:CGRectMake(54,rowH-0.5,W-54,0.5)];
+            sep.backgroundColor=[UIColor colorWithWhite:1 alpha:0.06];
+            [row addSubview:sep];
+        }
+        row.tag=[rd[@"tag"] integerValue];
+        [self.panel addSubview:row];
+    }
+
+    [self.rootVC.view addSubview:self.panel];
+}
+
+- (void)rowDown:(UIButton *)row {
+    [UIView animateWithDuration:0.08 animations:^{
+        row.backgroundColor=[UIColor colorWithWhite:1 alpha:0.08];
     }];
 }
-- (void)btnUnhighlight {
-    [UIView animateWithDuration:0.15 delay:0 usingSpringWithDamping:0.6 initialSpringVelocity:0.5 options:0 animations:^{
-        self.btn.transform=CGAffineTransformIdentity;
-    } completion:nil];
+- (void)rowUp:(UIButton *)row {
+    [UIView animateWithDuration:0.15 animations:^{
+        row.backgroundColor=UIColor.clearColor;
+    }];
 }
-
-- (void)btnTapped {
-    if (self.panelShown) { [self dismissPanel]; return; }
-    [self showPanel];
-}
-
-- (void)showPanel {
-    self.panelShown=YES;
-    [self.panel updateState];
-    // Posisi panel
-    CGRect bf=self.btn.frame;
-    CGRect bounds=self.rootVC.view.bounds;
-    CGFloat px=bf.origin.x-270;
-    if (px<8) px=bf.origin.x+bf.size.width+8;
-    CGFloat py=bf.origin.y;
-    if (py+self.panel.bounds.size.height>bounds.size.height-20)
-        py=bounds.size.height-self.panel.bounds.size.height-20;
-    self.panel.frame=CGRectMake(px,py,260,52+56*4);
-    self.panel.hidden=NO;
-    [self.rootVC.view bringSubviewToFront:self.panel];
-    [UIView animateWithDuration:0.3 delay:0 usingSpringWithDamping:0.75 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseOut animations:^{
-        self.panel.alpha=1;
-        self.panel.transform=CGAffineTransformIdentity;
-    } completion:nil];
-}
-
-- (void)dismissPanel {
-    self.panelShown=NO;
-    [UIView animateWithDuration:0.2 animations:^{
-        self.panel.alpha=0;
-        self.panel.transform=CGAffineTransformMakeScale(0.9,0.9);
-    } completion:^(BOOL f){ self.panel.hidden=YES; self.panel.transform=CGAffineTransformMakeScale(0.85,0.85); }];
+- (void)rowTapped:(UIButton *)row {
+    switch(row.tag) {
+        case 1: // Backup
+            [self dismissPanel];
+            [[ZBManager shared] backupFrom:self.rootVC silent:NO];
+            break;
+        case 2: // Restore
+            [self dismissPanel];
+            [[ZBManager shared] restoreFrom:self.rootVC];
+            break;
+        case 3: // Auto Backup
+            [self handleAutoBackup];
+            break;
+        case 4: // Dong
+            [self dismissPanel];
+            break;
+    }
 }
 
 - (void)handleAutoBackup {
     ZBManager *mgr=[ZBManager shared];
     if (mgr.autoTimer) {
+        [self dismissPanel];
         [mgr stopAutoBackup];
-        [self.panel updateState];
         return;
     }
-    // Chon tan suat
+    [self dismissPanel];
     UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Auto Backup"
         message:@"Tu dong backup moi bao lau?" preferredStyle:UIAlertControllerStyleActionSheet];
     NSArray *opts=@[@"1 gio",@"2 gio",@"4 gio",@"6 gio",@"12 gio",@"24 gio"];
@@ -551,7 +407,6 @@
         NSInteger h=[vals[i] integerValue]; NSString *t=opts[i];
         [ac addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction *_){
             [mgr startAutoBackup:h vc:self.rootVC];
-            [self.panel updateState];
         }]];
     }
     [ac addAction:[UIAlertAction actionWithTitle:@"Huy" style:UIAlertActionStyleCancel handler:nil]];
@@ -560,6 +415,88 @@
     [self.rootVC presentViewController:ac animated:YES completion:nil];
 }
 
+- (void)updateUI {
+    ZBManager *m=[ZBManager shared];
+    self.badgeDot.hidden=!m.autoTimer;
+    if (m.busy) {
+        self.statusLbl.text=@"Dang xu ly...";
+        self.statusLbl.textColor=[UIColor colorWithRed:1 green:0.6 blue:0 alpha:1];
+    } else if (m.autoTimer) {
+        self.statusLbl.text=[NSString stringWithFormat:@"Auto: moi %ldh • Dang chay",(long)m.autoHours];
+        self.statusLbl.textColor=[UIColor colorWithRed:0.2 green:0.85 blue:0.4 alpha:1];
+        // Cap nhat title row auto
+        for (UIView *v in self.panel.subviews) {
+            if ([v isKindOfClass:[UIButton class]] && v.tag==3) {
+                for (UIView *sv in v.subviews) {
+                    if ([sv isKindOfClass:[UILabel class]]) {
+                        UILabel *l=(UILabel*)sv;
+                        if ([l.text isEqualToString:@"Auto Backup"] ||
+                            [l.text hasPrefix:@"Dung Auto"] ||
+                            [l.text isEqualToString:@"Auto Backup"])
+                            l.text=[NSString stringWithFormat:@"Dung Auto (%ldh)",(long)m.autoHours];
+                    }
+                }
+            }
+        }
+    } else {
+        self.statusLbl.text=@"San sang";
+        self.statusLbl.textColor=[UIColor colorWithWhite:0.5 alpha:1];
+        for (UIView *v in self.panel.subviews) {
+            if ([v isKindOfClass:[UIButton class]] && v.tag==3) {
+                for (UIView *sv in v.subviews) {
+                    if ([sv isKindOfClass:[UILabel class]]) {
+                        UILabel *l=(UILabel*)sv;
+                        if ([l.text hasPrefix:@"Dung Auto"]) l.text=@"Auto Backup";
+                    }
+                }
+            }
+        }
+    }
+}
+
+- (void)btnDown {
+    [UIView animateWithDuration:0.1 animations:^{
+        self.btn.transform=CGAffineTransformMakeScale(0.9,0.9);
+    }];
+}
+- (void)btnUp {
+    [UIView animateWithDuration:0.2 delay:0 usingSpringWithDamping:0.5 initialSpringVelocity:0.5 options:0 animations:^{
+        self.btn.transform=CGAffineTransformIdentity;
+    } completion:nil];
+}
+- (void)btnTapped {
+    if (self.panelShown) { [self dismissPanel]; return; }
+    [self showPanel];
+}
+- (void)showPanel {
+    self.panelShown=YES;
+    [self updateUI];
+    CGRect bf=self.btn.frame;
+    CGRect bounds=self.rootVC.view.bounds;
+    CGFloat pw=240, ph=54+52*4;
+    CGFloat px=bf.origin.x-pw-8;
+    if (px<8) px=bf.origin.x+bf.size.width+8;
+    CGFloat py=bf.origin.y;
+    if (py+ph>bounds.size.height-20) py=bounds.size.height-ph-20;
+    self.panel.frame=CGRectMake(px,py,pw,ph);
+    self.panel.hidden=NO;
+    self.panel.transform=CGAffineTransformMakeScale(0.88,0.88);
+    [self.rootVC.view bringSubviewToFront:self.panel];
+    [UIView animateWithDuration:0.28 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.3 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        self.panel.alpha=1;
+        self.panel.transform=CGAffineTransformIdentity;
+    } completion:nil];
+}
+- (void)dismissPanel {
+    self.panelShown=NO;
+    [UIView animateWithDuration:0.18 animations:^{
+        self.panel.alpha=0;
+        self.panel.transform=CGAffineTransformMakeScale(0.9,0.9);
+    } completion:^(BOOL f){
+        self.panel.hidden=YES;
+        self.panel.transform=CGAffineTransformMakeScale(0.88,0.88);
+    }];
+}
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     CGPoint p=[self.rootVC.view convertPoint:point fromView:self];
     if (!self.panel.hidden && CGRectContainsPoint(self.panel.frame,p))
@@ -568,7 +505,6 @@
     if (self.rootVC.presentedViewController) return [super hitTest:point withEvent:event];
     return nil;
 }
-
 - (void)pan:(UIPanGestureRecognizer *)p {
     CGPoint t=[p translationInView:self.rootVC.view];
     CGRect f=self.btn.frame, b=self.rootVC.view.bounds;
@@ -582,19 +518,17 @@
 static ZBWindow *zWin;
 static void launchZPRO() {
     if (zWin) return;
-    dispatch_async(dispatch_get_main_queue(),^{
-        UIWindowScene *scene=nil;
-        for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
-            if (s.activationState==UISceneActivationStateForegroundActive &&
-                [s isKindOfClass:[UIWindowScene class]]) { scene=(UIWindowScene*)s; break; }
-        }
-        if (scene) {
-            zWin=[[ZBWindow alloc] initWithWindowScene:scene];
-        } else {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),
-                dispatch_get_main_queue(),^{ launchZPRO(); });
-        }
-    });
+    UIWindowScene *scene=nil;
+    for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+        if (s.activationState==UISceneActivationStateForegroundActive &&
+            [s isKindOfClass:[UIWindowScene class]]) { scene=(UIWindowScene*)s; break; }
+    }
+    if (scene) {
+        zWin=[[ZBWindow alloc] initWithWindowScene:scene];
+    } else {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),
+            dispatch_get_main_queue(),^{ launchZPRO(); });
+    }
 }
 __attribute__((constructor))
 static void zbInit() {
