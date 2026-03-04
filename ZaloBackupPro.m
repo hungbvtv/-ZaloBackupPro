@@ -288,7 +288,7 @@
     [menu addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [[ZBManager shared] startRestoreFrom:self.rootVC];
     }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"Dong" style:UIAlertActionStyleCancel handler:nil]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"Đóng" style:UIAlertActionStyleCancel handler:nil]];
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
         menu.popoverPresentationController.sourceView = self.btn;
         menu.popoverPresentationController.sourceRect = self.btn.bounds;
