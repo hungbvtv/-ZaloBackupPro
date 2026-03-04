@@ -172,10 +172,10 @@
 - (void)documentPicker:(UIDocumentPickerViewController *)c didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url=urls.firstObject; if (!url) return;
     UIViewController *vc=self.pendingVC;
-    UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Xac nhan khoi phuc"
-        message:[NSString stringWithFormat:@"%@\nDu lieu se bi ghi de. App tu dong sau khi xong.",url.lastPathComponent]
+    UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Xac nhan khôi phục"
+        message:[NSString stringWithFormat:@"%@\nDữ liệu sẽ bị ghi đè. App tự đóng sau khi xong.",url.lastPathComponent]
         preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Khoi Phuc" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_){
+    [ac addAction:[UIAlertAction actionWithTitle:@"Khôi Phục" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_){
         self.busy=YES;
         dispatch_async(dispatch_get_global_queue(0,0),^{
             NSDictionary *entries=[ZBZip unzipFile:url.path];
@@ -196,7 +196,7 @@
             dispatch_async(dispatch_get_main_queue(),^{ self.busy=NO; exit(0); });
         });
     }]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Huy" style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
     [[self topVC:vc] presentViewController:ac animated:YES completion:nil];
 }
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)c {}
@@ -307,7 +307,7 @@
     [self.panel addSubview:titleLbl];
 
     self.statusLbl=[UILabel new];
-    self.statusLbl.text=@"San sang";
+    self.statusLbl.text=@"Sẵn sàng";
     self.statusLbl.font=[UIFont systemFontOfSize:11];
     self.statusLbl.textColor=[UIColor colorWithWhite:0.5 alpha:1];
     self.statusLbl.frame=CGRectMake(46,30,W-60,16);
