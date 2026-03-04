@@ -2,6 +2,95 @@
 #import <UIKit/UIKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <zlib.h>
+
+#define ZB_CHUNK 16384
+
+@interface ZBZip : NSObject
++ (BOOL)zipFiles:(NSArray<NSDictionary *> *)files toPath:(NSString *)zipPath;
++ (NSDictionary *)unzipFile:(NSString *)zipPath;
+@end
+
+@implementation ZBZip
+
++ (NSData *)gzipCompress:(NSData *)data {
+    if (!data.length) return nil;
+    z_stream stream;
+    stream.zalloc = Z_NULL; stream.zfree = Z_NULL; stream.opaque = Z_NULL;
+    if (deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15+16, 8, Z_DEFAULT_STRATEGY) != Z_OK) return nil;
+    NSMutableData *out = [NSMutableData dataWithLength:ZB_CHUNK];
+    stream.next_in = (Bytef *)data.bytes;
+    stream.avail_in = (uInt)data.length;
+    do {
+        if (stream.total_out >= out.length) [out increaseLengthBy:ZB_CHUNK];
+        stream.next_out = (Bytef *)out.mutableBytes + stream.total_out;
+        stream.avail_out = (uInt)(out.length - stream.total_out);
+        deflate(&stream, Z_FINISH);
+    } while (stream.avail_out == 0);
+    deflateEnd(&stream);
+    out.length = stream.total_out;
+    return out;
+}
+
++ (NSData *)gzipDecompress:(NSData *)data {
+    if (!data.length) return nil;
+    z_stream stream;
+    stream.zalloc = Z_NULL; stream.zfree = Z_NULL;
+    stream.avail_in = (uInt)data.length;
+    stream.next_in = (Bytef *)data.bytes;
+    if (inflateInit2(&stream, 15+16) != Z_OK) return nil;
+    NSMutableData *out = [NSMutableData dataWithLength:data.length * 4];
+    do {
+        if (stream.total_out >= out.length) [out increaseLengthBy:data.length * 2];
+        stream.next_out = (Bytef *)out.mutableBytes + stream.total_out;
+        stream.avail_out = (uInt)(out.length - stream.total_out);
+        int st = inflate(&stream, Z_SYNC_FLUSH);
+        if (st == Z_STREAM_END) break;
+        if (st != Z_OK) { inflateEnd(&stream); return nil; }
+    } while (stream.avail_out == 0);
+    inflateEnd(&stream);
+    out.length = stream.total_out;
+    return out;
+}
+
++ (BOOL)zipFiles:(NSArray<NSDictionary *> *)files toPath:(NSString *)zipPath {
+    NSMutableData *archive = [NSMutableData data];
+    for (NSDictionary *entry in files) {
+        NSString *name = entry[@"name"];
+        NSData *data = entry[@"data"];
+        if (!name || !data) continue;
+        NSData *compressed = [self gzipCompress:data] ?: data;
+        uint32_t nameLen = (uint32_t)name.length;
+        uint32_t dataLen = (uint32_t)compressed.length;
+        [archive appendBytes:&nameLen length:4];
+        [archive appendData:[name dataUsingEncoding:NSUTF8StringEncoding]];
+        [archive appendBytes:&dataLen length:4];
+        [archive appendData:compressed];
+    }
+    return [archive writeToFile:zipPath atomically:YES];
+}
+
++ (NSDictionary *)unzipFile:(NSString *)zipPath {
+    NSData *archive = [NSData dataWithContentsOfFile:zipPath];
+    if (!archive) return @{};
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    NSUInteger offset = 0;
+    while (offset + 8 <= archive.length) {
+        uint32_t nameLen = 0;
+        [archive getBytes:&nameLen range:NSMakeRange(offset, 4)]; offset += 4;
+        if (offset + nameLen > archive.length) break;
+        NSData *nameData = [archive subdataWithRange:NSMakeRange(offset, nameLen)]; offset += nameLen;
+        NSString *name = [[NSString alloc] initWithData:nameData encoding:NSUTF8StringEncoding];
+        uint32_t dataLen = 0;
+        [archive getBytes:&dataLen range:NSMakeRange(offset, 4)]; offset += 4;
+        if (offset + dataLen > archive.length) break;
+        NSData *compressed = [archive subdataWithRange:NSMakeRange(offset, dataLen)]; offset += dataLen;
+        NSData *decompressed = [self gzipDecompress:compressed] ?: compressed;
+        if (name) result[name] = decompressed;
+    }
+    return result;
+}
+@end
 
 @interface ZBRootVC : UIViewController @end
 @implementation ZBRootVC
@@ -13,7 +102,6 @@
 - (void)startBackupFrom:(UIViewController *)vc;
 - (void)startRestoreFrom:(UIViewController *)vc;
 @property (nonatomic, strong) UIViewController *pendingVC;
-@property (nonatomic, assign) BOOL isRestoreMode;
 @property (nonatomic, assign) BOOL isProcessing;
 @end
 
@@ -22,11 +110,6 @@
 + (instancetype)shared {
     static ZBManager *s; static dispatch_once_t t;
     dispatch_once(&t, ^{ s = [ZBManager new]; }); return s;
-}
-
-- (NSString *)backupRoot {
-    return [[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES) firstObject]
-            stringByAppendingPathComponent:@"ZaloBackupPro_Data"];
 }
 
 - (UIViewController *)topFrom:(UIViewController *)vc {
@@ -42,12 +125,6 @@
 
     dispatch_async(dispatch_get_global_queue(0,0), ^{
         NSFileManager *fm = NSFileManager.defaultManager;
-        NSDateFormatter *df = [NSDateFormatter new];
-        df.dateFormat = @"yyyyMMdd_HHmmss";
-        NSString *folderName = [NSString stringWithFormat:@"ZaloBackup_%@", [df stringFromDate:NSDate.date]];
-        NSString *dest = [[self backupRoot] stringByAppendingPathComponent:folderName];
-        [fm createDirectoryAtPath:dest withIntermediateDirectories:YES attributes:nil error:nil];
-
         NSArray *sources = @[
             @{@"path":[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"], @"prefix":@"L|"},
             @{@"path":[NSHomeDirectory() stringByAppendingPathComponent:@"Documents"], @"prefix":@"D|"},
@@ -56,40 +133,48 @@
         NSSet *exts = [NSSet setWithArray:@[@"db",@"sqlite",@"sqlite3",@"sqlite-wal",@"sqlite-shm",
                                              @"db-wal",@"db-shm",@"jpg",@"jpeg",@"png",@"mp4",
                                              @"mov",@"plist",@"m4a",@"aac",@"mp3"]];
-        NSInteger count = 0;
+        NSMutableArray *entries = [NSMutableArray array];
         for (NSDictionary *source in sources) {
             NSString *root = source[@"path"];
             if (![fm fileExistsAtPath:root]) continue;
             NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
             NSString *file;
             while ((file = en.nextObject)) {
-                if ([file containsString:@"ZaloBackupPro_Data"]) continue;
+                if ([file containsString:@"ZaloBackupPro"]) continue;
                 if ([exts containsObject:file.pathExtension.lowercaseString]) {
                     NSString *src = [root stringByAppendingPathComponent:file];
-                    NSString *safe = [NSString stringWithFormat:@"%@%@", source[@"prefix"],
-                                      [file stringByReplacingOccurrencesOfString:@"/" withString:@"|"]];
-                    NSString *dst = [dest stringByAppendingPathComponent:safe];
-                    [fm removeItemAtPath:dst error:nil];
-                    if ([fm copyItemAtPath:src toPath:dst error:nil]) count++;
+                    NSData *data = [NSData dataWithContentsOfFile:src];
+                    if (!data) continue;
+                    NSString *entryName = [NSString stringWithFormat:@"%@%@",
+                        source[@"prefix"],
+                        [file stringByReplacingOccurrencesOfString:@"/" withString:@"|"]];
+                    [entries addObject:@{@"name":entryName, @"data":data}];
                 }
             }
         }
 
-        NSString *msg = [NSString stringWithFormat:@"Da sao luu %ld tep.\nThu muc: %@\n\nChon: Giu trong Documents hoac Share ra ngoai.", (long)count, folderName];
+        NSDateFormatter *df = [NSDateFormatter new];
+        df.dateFormat = @"yyyyMMdd_HHmmss";
+        NSString *fname = [NSString stringWithFormat:@"ZaloBackup_%@.zbak", [df stringFromDate:NSDate.date]];
+        NSString *tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:fname];
+        BOOL ok = [ZBZip zipFiles:entries toPath:tmpPath];
+
         dispatch_async(dispatch_get_main_queue(), ^{
             self.isProcessing = NO;
-            UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Backup Xong"
-                message:msg preferredStyle:UIAlertControllerStyleAlert];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Share / Luu Ra Ngoai" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
-                NSURL *url = [NSURL fileURLWithPath:dest];
-                UIActivityViewController *avc = [[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:nil];
+            if (ok) {
+                NSURL *url = [NSURL fileURLWithPath:tmpPath];
+                UIActivityViewController *avc = [[UIActivityViewController alloc]
+                    initWithActivityItems:@[url] applicationActivities:nil];
                 if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
                     avc.popoverPresentationController.sourceView = vc.view;
                 }
                 [[self topFrom:vc] presentViewController:avc animated:YES completion:nil];
-            }]];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Giu Trong Documents" style:UIAlertActionStyleDefault handler:nil]];
-            [[self topFrom:vc] presentViewController:ac animated:YES completion:nil];
+            } else {
+                UIAlertController *err = [UIAlertController alertControllerWithTitle:@"Loi"
+                    message:@"Khong the tao file backup." preferredStyle:UIAlertControllerStyleAlert];
+                [err addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [[self topFrom:vc] presentViewController:err animated:YES completion:nil];
+            }
         });
     });
 }
@@ -97,13 +182,14 @@
 - (void)startRestoreFrom:(UIViewController *)vc {
     if (self.isProcessing) return;
     self.pendingVC = vc;
-    self.isRestoreMode = YES;
-
     UIDocumentPickerViewController *picker;
     if (@available(iOS 14.0, *)) {
-        picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeFolder] asCopy:NO];
+        UTType *zbakType = [UTType typeWithFilenameExtension:@"zbak"];
+        NSArray *types = zbakType ? @[zbakType] : @[UTTypeData];
+        picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
     } else {
-        picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.folder"] inMode:UIDocumentPickerModeOpen];
+        picker = [[UIDocumentPickerViewController alloc]
+                  initWithDocumentTypes:@[@"public.data"] inMode:UIDocumentPickerModeImport];
     }
     picker.delegate = self;
     picker.allowsMultipleSelection = NO;
@@ -114,44 +200,37 @@
     NSURL *url = urls.firstObject;
     if (!url) return;
     UIViewController *vc = self.pendingVC;
-    BOOL ok = [url startAccessingSecurityScopedResource];
-
     UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Xac Nhan Khoi Phuc"
-        message:[NSString stringWithFormat:@"Khoi phuc tu:\n%@\n\nDu lieu se bi ghi de. App se tu dong sau khi xong.", url.lastPathComponent]
+        message:[NSString stringWithFormat:@"File: %@\nDu lieu se bi ghi de. App se tu dong sau khi xong.", url.lastPathComponent]
         preferredStyle:UIAlertControllerStyleAlert];
     [confirm addAction:[UIAlertAction actionWithTitle:@"Khoi Phuc" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
         self.isProcessing = YES;
         dispatch_async(dispatch_get_global_queue(0,0), ^{
+            NSDictionary *entries = [ZBZip unzipFile:url.path];
             NSFileManager *fm = NSFileManager.defaultManager;
-            NSArray *files = [fm contentsOfDirectoryAtPath:url.path error:nil];
-            NSInteger count = 0;
-            for (NSString *f in files) {
-                if (f.length < 3) continue;
-                NSString *src = [url.path stringByAppendingPathComponent:f];
-                NSString *rel = [[f substringFromIndex:2] stringByReplacingOccurrencesOfString:@"|" withString:@"/"];
+            for (NSString *name in entries) {
+                if (name.length < 3) continue;
+                NSData *data = entries[name];
+                NSString *rel = [[name substringFromIndex:2] stringByReplacingOccurrencesOfString:@"|" withString:@"/"];
                 NSString *dst = nil;
-                if ([f hasPrefix:@"L|"])
+                if ([name hasPrefix:@"L|"])
                     dst = [[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"] stringByAppendingPathComponent:rel];
-                else if ([f hasPrefix:@"D|"])
+                else if ([name hasPrefix:@"D|"])
                     dst = [[NSHomeDirectory() stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:rel];
-                else if ([f hasPrefix:@"C|"])
+                else if ([name hasPrefix:@"C|"])
                     dst = [[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches"] stringByAppendingPathComponent:rel];
                 if (dst) {
                     [fm createDirectoryAtPath:dst.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
-                    [fm removeItemAtPath:dst error:nil];
-                    if ([fm copyItemAtPath:src toPath:dst error:nil]) count++;
+                    [data writeToFile:dst atomically:YES];
                 }
             }
-            if (ok) [url stopAccessingSecurityScopedResource];
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.isProcessing = NO;
                 exit(0);
             });
         });
     }]];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Huy" style:UIAlertActionStyleCancel handler:^(UIAlertAction *_) {
-        if (ok) [url stopAccessingSecurityScopedResource];
-    }]];
+    [confirm addAction:[UIAlertAction actionWithTitle:@"Huy" style:UIAlertActionStyleCancel handler:nil]];
     [[self topFrom:vc] presentViewController:confirm animated:YES completion:nil];
 }
 
@@ -187,7 +266,6 @@
     self.btn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
     [self.btn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [self.btn addTarget:self action:@selector(btnTapped) forControlEvents:UIControlEventTouchUpInside];
-
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(pan:)];
     [self.btn addGestureRecognizer:pan];
     [self.rootVC.view addSubview:self.btn];
