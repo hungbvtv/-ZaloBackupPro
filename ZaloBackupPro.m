@@ -172,7 +172,7 @@
 - (void)documentPicker:(UIDocumentPickerViewController *)c didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url=urls.firstObject; if (!url) return;
     UIViewController *vc=self.pendingVC;
-    UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Xac nhan khôi phục"
+    UIAlertController *ac=[UIAlertController alertControllerWithTitle:@"Xác Nhận khôi phục"
         message:[NSString stringWithFormat:@"%@\nDữ liệu sẽ bị ghi đè. App tự đóng sau khi xong.",url.lastPathComponent]
         preferredStyle:UIAlertControllerStyleAlert];
     [ac addAction:[UIAlertAction actionWithTitle:@"Khôi Phục" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_){
@@ -422,7 +422,7 @@
         self.statusLbl.text=@"Đang xử lý...";
         self.statusLbl.textColor=[UIColor colorWithRed:1 green:0.6 blue:0 alpha:1];
     } else if (m.autoTimer) {
-        self.statusLbl.text=[NSString stringWithFormat:@"Auto: moi %ldh • Đang chạy",(long)m.autoHours];
+        self.statusLbl.text=[NSString stringWithFormat:@"Auto: mỗi %ldh • Đang chạy",(long)m.autoHours];
         self.statusLbl.textColor=[UIColor colorWithRed:0.2 green:0.85 blue:0.4 alpha:1];
         // Cap nhat title row auto
         for (UIView *v in self.panel.subviews) {
@@ -439,14 +439,14 @@
             }
         }
     } else {
-        self.statusLbl.text=@"San sang";
+        self.statusLbl.text=@"Sẵn Sàng";
         self.statusLbl.textColor=[UIColor colorWithWhite:0.5 alpha:1];
         for (UIView *v in self.panel.subviews) {
             if ([v isKindOfClass:[UIButton class]] && v.tag==3) {
                 for (UIView *sv in v.subviews) {
                     if ([sv isKindOfClass:[UILabel class]]) {
                         UILabel *l=(UILabel*)sv;
-                        if ([l.text hasPrefix:@"Dung Auto"]) l.text=@"Auto Backup";
+                        if ([l.text hasPrefix:@"Dừng Auto"]) l.text=@"Auto Backup";
                     }
                 }
             }
