@@ -140,9 +140,8 @@
 }
 - (void)restoreFrom:(UIViewController *)vc {
     if (self.busy) return; self.pendingVC=vc;
-    // Dung public.data string de tranh loi UTType forward declaration
     UIDocumentPickerViewController *picker;
-    picker=[[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data", @"public.item", @"public.content"] inMode:UIDocumentPickerModeImport];
+    picker=[[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data",@"public.item"] inMode:UIDocumentPickerModeImport];
     picker.delegate=self; picker.allowsMultipleSelection=NO;
     [[self topVC:vc] presentViewController:picker animated:YES completion:nil];
 }
@@ -180,35 +179,68 @@
 @end
 
 // ============================================================
-// Inject nut ZPRO thang vao Zalo window - KHONG tao UIWindow moi
+// Inject vao Zalo window - an hoan toan
+// Double tap goc PHAI DUOI de hien/an nut ZPRO
 // ============================================================
 
-@interface UIButton (ZBActions)
-- (void)zbTapped;
-- (void)zbPan:(UIPanGestureRecognizer *)p;
+static UIButton *_zbBtn = nil;
+static UIView *_zbCorner = nil;
+static BOOL _zbVisible = NO;
+
+static UIViewController * zbTopVC() {
+    UIWindowScene *scene=nil;
+    for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+        if (s.activationState==UISceneActivationStateForegroundActive &&
+            [s isKindOfClass:[UIWindowScene class]]) { scene=(UIWindowScene*)s; break; }
+    }
+    UIWindow *win=nil;
+    for (UIWindow *w in scene.windows) {
+        if (!w.isHidden && w.alpha>0) { win=w; break; }
+    }
+    UIViewController *vc=win.rootViewController;
+    while (vc.presentedViewController) vc=vc.presentedViewController;
+    return vc;
+}
+
+static void zbToggleButton() {
+    if (!_zbBtn) return;
+    if (_zbVisible) {
+        [UIView animateWithDuration:0.2 animations:^{ _zbBtn.alpha=0; }
+            completion:^(BOOL f){ _zbBtn.hidden=YES; _zbVisible=NO; }];
+    } else {
+        _zbBtn.hidden=NO; _zbBtn.alpha=0;
+        [UIView animateWithDuration:0.25 animations:^{ _zbBtn.alpha=1; }];
+        _zbVisible=YES;
+    }
+}
+
+@interface UIButton (ZBFinal)
+- (void)zbFinalTap;
+- (void)zbFinalPan:(UIPanGestureRecognizer *)p;
 @end
-
-@implementation UIButton (ZBActions)
-- (void)zbTapped {
-    // Lay topVC tu Zalo window chinh
-    UIWindow *win = self.window;
-    UIViewController *vc = win.rootViewController;
-    while (vc.presentedViewController) vc = vc.presentedViewController;
-
+@implementation UIButton (ZBFinal)
+- (void)zbFinalTap {
+    UIViewController *vc = zbTopVC();
+    if (!vc) return;
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"ZaloBackup Pro"
         message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     [menu addAction:[UIAlertAction actionWithTitle:@"Backup" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_){
+        _zbBtn.hidden=YES; _zbVisible=NO;
         [[ZBManager shared] backupFrom:vc];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_){
+        _zbBtn.hidden=YES; _zbVisible=NO;
         [[ZBManager shared] restoreFrom:vc];
     }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"Dong" style:UIAlertActionStyleCancel handler:nil]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"An di" style:UIAlertActionStyleCancel handler:^(UIAlertAction *_){
+        [UIView animateWithDuration:0.2 animations:^{ _zbBtn.alpha=0; }
+            completion:^(BOOL f){ _zbBtn.hidden=YES; _zbVisible=NO; }];
+    }]];
     if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad)
         menu.popoverPresentationController.sourceView=self;
     [vc presentViewController:menu animated:YES completion:nil];
 }
-- (void)zbPan:(UIPanGestureRecognizer *)p {
+- (void)zbFinalPan:(UIPanGestureRecognizer *)p {
     CGPoint t=[p translationInView:self.superview];
     CGRect f=self.frame, b=self.superview.bounds;
     f.origin.x=MAX(8,MIN(f.origin.x+t.x,b.size.width-f.size.width-8));
@@ -218,24 +250,32 @@
 }
 @end
 
-static UIButton *_zbBtn=nil;
+@interface ZBCorner : UIView @end
+@implementation ZBCorner
+- (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
+    return CGRectContainsPoint(self.bounds,p) ? self : nil;
+}
+@end
 
-static void injectButton() {
-    if (_zbBtn && _zbBtn.superview) return;
+static void injectZPRO() {
     UIWindowScene *scene=nil;
     for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
-        if (s.activationState==UISceneActivationStateForegroundActive && [s isKindOfClass:[UIWindowScene class]])
-        { scene=(UIWindowScene *)s; break; }
+        if (s.activationState==UISceneActivationStateForegroundActive &&
+            [s isKindOfClass:[UIWindowScene class]]) { scene=(UIWindowScene*)s; break; }
     }
-    UIWindow *mainWin=nil;
+    UIWindow *win=nil;
     for (UIWindow *w in scene.windows) {
-        if (!w.isHidden && w.alpha>0) { mainWin=w; break; }
+        if (!w.isHidden && w.alpha>0) { win=w; break; }
     }
-    if (!mainWin) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{injectButton();});
+    if (!win) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(2*NSEC_PER_SEC)),
+            dispatch_get_main_queue(),^{ injectZPRO(); });
         return;
     }
+
     CGRect screen=UIScreen.mainScreen.bounds;
+
+    // Nut ZPRO - an tu dau
     _zbBtn=[UIButton buttonWithType:UIButtonTypeCustom];
     _zbBtn.frame=CGRectMake(screen.size.width-78, screen.size.height*0.55, 62, 62);
     _zbBtn.backgroundColor=[UIColor colorWithRed:0 green:0.47 blue:1 alpha:0.88];
@@ -249,14 +289,29 @@ static void injectButton() {
     [_zbBtn setTitle:@"ZPRO" forState:UIControlStateNormal];
     _zbBtn.titleLabel.font=[UIFont boldSystemFontOfSize:12];
     [_zbBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    [_zbBtn addTarget:_zbBtn action:@selector(zbTapped) forControlEvents:UIControlEventTouchUpInside];
-    UIPanGestureRecognizer *pan=[[UIPanGestureRecognizer alloc] initWithTarget:_zbBtn action:@selector(zbPan:)];
+    [_zbBtn addTarget:_zbBtn action:@selector(zbFinalTap) forControlEvents:UIControlEventTouchUpInside];
+    UIPanGestureRecognizer *pan=[[UIPanGestureRecognizer alloc] initWithTarget:_zbBtn action:@selector(zbFinalPan:)];
     [_zbBtn addGestureRecognizer:pan];
-    [mainWin addSubview:_zbBtn];
+    _zbBtn.hidden=YES;
+    _zbVisible=NO;
+    [win addSubview:_zbBtn];
+
+    // Vung cam ung bi mat goc phai duoi (80x80) - trong suot
+    _zbCorner=[[ZBCorner alloc] initWithFrame:CGRectMake(
+        screen.size.width-80, screen.size.height-80, 80, 80)];
+    _zbCorner.backgroundColor=UIColor.clearColor;
+    _zbCorner.layer.zPosition=9998;
+
+    UITapGestureRecognizer *dTap=[[UITapGestureRecognizer alloc]
+        initWithTarget:[NSBlockOperation blockOperationWithBlock:^{ zbToggleButton(); }]
+        action:@selector(main)];
+    dTap.numberOfTapsRequired=2;
+    [_zbCorner addGestureRecognizer:dTap];
+    [win addSubview:_zbCorner];
 }
 
 __attribute__((constructor))
 static void zbInit() {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(4*NSEC_PER_SEC)),
-                   dispatch_get_main_queue(),^{ injectButton(); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(5*NSEC_PER_SEC)),
+        dispatch_get_main_queue(),^{ injectZPRO(); });
 }
