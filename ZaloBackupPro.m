@@ -6,54 +6,6 @@
 #import <AVKit/AVKit.h>
 
 // ============================================================
-// ZBBackground - giữ app chạy nền bằng AVAudioSession silent
-// ============================================================
-@interface ZBBackground : NSObject
-+ (void)startKeepAlive;
-+ (void)stopKeepAlive;
-@end
-
-@implementation ZBBackground
-static AVAudioPlayer *_silentPlayer;
-
-+ (void)startKeepAlive {
-    uint8_t wav[] = {
-        0x52,0x49,0x46,0x46,
-        0x26,0x00,0x00,0x00,
-        0x57,0x41,0x56,0x45,
-        0x66,0x6D,0x74,0x20,
-        0x10,0x00,0x00,0x00,
-        0x01,0x00,
-        0x01,0x00,
-        0x44,0xAC,0x00,0x00,
-        0x88,0x58,0x01,0x00,
-        0x02,0x00,
-        0x10,0x00,
-        0x64,0x61,0x74,0x61,
-        0x02,0x00,0x00,0x00,
-        0x00,0x00
-    };
-    NSData *wavData = [NSData dataWithBytes:wav length:sizeof(wav)];
-    NSError *err = nil;
-    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback
-        withOptions:AVAudioSessionCategoryOptionMixWithOthers error:nil];
-    [[AVAudioSession sharedInstance] setActive:YES error:nil];
-    _silentPlayer = [[AVAudioPlayer alloc] initWithData:wavData error:&err];
-    if (!err) {
-        _silentPlayer.numberOfLoops = -1;
-        _silentPlayer.volume = 0.0;
-        [_silentPlayer play];
-    }
-}
-
-+ (void)stopKeepAlive {
-    [_silentPlayer stop];
-    _silentPlayer = nil;
-    [[AVAudioSession sharedInstance] setActive:NO error:nil];
-}
-@end
-
-// ============================================================
 // ZBImageDetailVC - xem ảnh full screen
 // ============================================================
 @interface ZBImageDetailVC : UIViewController <UIScrollViewDelegate>
@@ -338,12 +290,10 @@ static AVAudioPlayer *_silentPlayer;
 - (void)viewMediaFrom:(UIViewController *)vc;
 - (void)startAutoBackup:(NSInteger)hours vc:(UIViewController *)vc;
 - (void)stopAutoBackup;
-- (void)toggleKeepAlive;
 @property (nonatomic, strong) UIViewController *pendingVC;
 @property (nonatomic, assign) BOOL busy;
 @property (nonatomic, strong) NSTimer *autoTimer;
 @property (nonatomic, assign) NSInteger autoHours;
-@property (nonatomic, assign) BOOL keepAlive;
 @property (nonatomic, copy) void(^onStateChange)(void);
 @end
 
@@ -495,12 +445,6 @@ static AVAudioPlayer *_silentPlayer;
 - (void)autoFire { [self backupFrom:self.pendingVC silent:YES]; }
 - (void)stopAutoBackup {
     [self.autoTimer invalidate]; self.autoTimer = nil;
-    if (self.onStateChange) self.onStateChange();
-}
-
-- (void)toggleKeepAlive {
-    self.keepAlive = !self.keepAlive;
-    self.keepAlive ? [ZBBackground startKeepAlive] : [ZBBackground stopKeepAlive];
     if (self.onStateChange) self.onStateChange();
 }
 
@@ -662,7 +606,7 @@ static AVAudioPlayer *_silentPlayer;
 
 - (void)buildPanel {
     CGFloat W = 240, rowH = 52, headerH = 54;
-    CGFloat H = headerH + rowH * 6;
+    CGFloat H = headerH + rowH * 5;
 
     self.panel = [[UIView alloc] initWithFrame:CGRectMake(0, 0, W, H)];
     self.panel.backgroundColor = [UIColor colorWithRed:0.11 green:0.11 blue:0.12 alpha:0.96];
@@ -703,7 +647,6 @@ static AVAudioPlayer *_silentPlayer;
         @{@"icon":@"🔄", @"title":@"Restore",          @"tag":@2},
         @{@"icon":@"🖼",  @"title":@"Xem Ảnh & Video", @"tag":@5},
         @{@"icon":@"⏱",  @"title":@"Auto Backup",      @"tag":@3},
-        @{@"icon":@"🔁", @"title":@"Chạy Nền",         @"tag":@6},
         @{@"icon":@"✕",  @"title":@"Đóng",             @"tag":@4},
     ];
 
@@ -753,7 +696,6 @@ static AVAudioPlayer *_silentPlayer;
         case 3: [self handleAutoBackup]; break;
         case 4: [self dismissPanel]; break;
         case 5: [self dismissPanel]; [[ZBManager shared] viewMediaFrom:self.rootVC]; break;
-        case 6: [self dismissPanel]; [[ZBManager shared] toggleKeepAlive]; break;
     }
 }
 
@@ -779,34 +721,26 @@ static AVAudioPlayer *_silentPlayer;
 
 - (void)updateUI {
     ZBManager *m = [ZBManager shared];
-    self.badgeDot.hidden = !(m.autoTimer || m.keepAlive);
+    self.badgeDot.hidden = !m.autoTimer;
     if (m.busy) {
         self.statusLbl.text = @"Đang xử lý...";
         self.statusLbl.textColor = [UIColor colorWithRed:1 green:0.6 blue:0 alpha:1];
+    } else if (m.autoTimer) {
+        self.statusLbl.text = [NSString stringWithFormat:@"Auto %ldh • Đang chạy",(long)m.autoHours];
+        self.statusLbl.textColor = [UIColor colorWithRed:0.2 green:0.85 blue:0.4 alpha:1];
     } else {
-        NSMutableArray *st = [NSMutableArray array];
-        if (m.autoTimer) [st addObject:[NSString stringWithFormat:@"Auto %ldh",(long)m.autoHours]];
-        if (m.keepAlive) [st addObject:@"Chạy nền"];
-        if (st.count) {
-            self.statusLbl.text = [st componentsJoinedByString:@" • "];
-            self.statusLbl.textColor = [UIColor colorWithRed:0.2 green:0.85 blue:0.4 alpha:1];
-        } else {
-            self.statusLbl.text = @"Sẵn Sàng";
-            self.statusLbl.textColor = [UIColor colorWithWhite:0.5 alpha:1];
-        }
+        self.statusLbl.text = @"Sẵn Sàng";
+        self.statusLbl.textColor = [UIColor colorWithWhite:0.5 alpha:1];
     }
     for (UIView *v in self.panel.subviews) {
         if (![v isKindOfClass:[UIButton class]]) continue;
         for (UIView *sv in v.subviews) {
             if (![sv isKindOfClass:[UILabel class]]) continue;
             UILabel *l = (UILabel *)sv;
-            ZBManager *m2 = [ZBManager shared];
             if (v.tag == 3 && ([l.text hasPrefix:@"Auto"] || [l.text hasPrefix:@"Dừng Auto"]))
-                l.text = m2.autoTimer ? [NSString stringWithFormat:@"Dừng Auto (%ldh)",(long)m2.autoHours] : @"Auto Backup";
-            if (v.tag == 6 && ([l.text isEqualToString:@"Chạy Nền"] || [l.text isEqualToString:@"Dừng Chạy Nền"])) {
-                l.text = m2.keepAlive ? @"Dừng Chạy Nền" : @"Chạy Nền";
-                l.textColor = m2.keepAlive ? [UIColor colorWithRed:0.2 green:0.85 blue:0.4 alpha:1] : UIColor.whiteColor;
-            }
+                l.text = m.autoTimer
+                    ? [NSString stringWithFormat:@"Dừng Auto (%ldh)",(long)m.autoHours]
+                    : @"Auto Backup";
         }
     }
 }
@@ -825,7 +759,7 @@ static AVAudioPlayer *_silentPlayer;
 - (void)showPanel {
     self.panelShown = YES; [self updateUI];
     CGRect bf = self.btn.frame, bounds = self.rootVC.view.bounds;
-    CGFloat pw = 240, ph = 54 + 52 * 6;
+    CGFloat pw = 240, ph = 54 + 52 * 5;
     CGFloat px = bf.origin.x - pw - 8;
     if (px < 8) px = bf.origin.x + bf.size.width + 8;
     CGFloat py = bf.origin.y;
