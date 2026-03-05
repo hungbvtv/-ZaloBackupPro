@@ -2,36 +2,54 @@
 #import <UIKit/UIKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <objc/runtime.h>
+#import <AVFoundation/AVFoundation.h>
+#import <AVKit/AVKit.h>
 
 // ============================================================
-// ZBGalleryCell
+// ZBBackground - giữ app chạy nền bằng AVAudioSession silent
 // ============================================================
-@interface ZBGalleryCell : UICollectionViewCell
-@property (nonatomic, strong) UIImageView *imageView;
-@property (nonatomic, strong) UILabel *nameLbl;
+@interface ZBBackground : NSObject
++ (void)startKeepAlive;
++ (void)stopKeepAlive;
 @end
 
-@implementation ZBGalleryCell
-- (instancetype)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (!self) return nil;
-    self.contentView.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
-    self.contentView.layer.cornerRadius = 8;
-    self.contentView.clipsToBounds = YES;
+@implementation ZBBackground
+static AVAudioPlayer *_silentPlayer;
 
-    self.imageView = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, frame.size.width, frame.size.width)];
-    self.imageView.contentMode = UIViewContentModeScaleAspectFill;
-    self.imageView.clipsToBounds = YES;
-    [self.contentView addSubview:self.imageView];
++ (void)startKeepAlive {
+    uint8_t wav[] = {
+        0x52,0x49,0x46,0x46,
+        0x26,0x00,0x00,0x00,
+        0x57,0x41,0x56,0x45,
+        0x66,0x6D,0x74,0x20,
+        0x10,0x00,0x00,0x00,
+        0x01,0x00,
+        0x01,0x00,
+        0x44,0xAC,0x00,0x00,
+        0x88,0x58,0x01,0x00,
+        0x02,0x00,
+        0x10,0x00,
+        0x64,0x61,0x74,0x61,
+        0x02,0x00,0x00,0x00,
+        0x00,0x00
+    };
+    NSData *wavData = [NSData dataWithBytes:wav length:sizeof(wav)];
+    NSError *err = nil;
+    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback
+        withOptions:AVAudioSessionCategoryOptionMixWithOthers error:nil];
+    [[AVAudioSession sharedInstance] setActive:YES error:nil];
+    _silentPlayer = [[AVAudioPlayer alloc] initWithData:wavData error:&err];
+    if (!err) {
+        _silentPlayer.numberOfLoops = -1;
+        _silentPlayer.volume = 0.0;
+        [_silentPlayer play];
+    }
+}
 
-    self.nameLbl = [[UILabel alloc] initWithFrame:CGRectMake(2, frame.size.width, frame.size.width - 4, 16)];
-    self.nameLbl.font = [UIFont systemFontOfSize:9];
-    self.nameLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1];
-    self.nameLbl.textAlignment = NSTextAlignmentCenter;
-    self.nameLbl.lineBreakMode = NSLineBreakByTruncatingMiddle;
-    [self.contentView addSubview:self.nameLbl];
-
-    return self;
++ (void)stopKeepAlive {
+    [_silentPlayer stop];
+    _silentPlayer = nil;
+    [[AVAudioSession sharedInstance] setActive:NO error:nil];
 }
 @end
 
@@ -92,9 +110,7 @@
     doubleTap.numberOfTapsRequired = 2;
     [scroll addGestureRecognizer:doubleTap];
 }
-- (UIView *)viewForZoomingInScrollView:(UIScrollView *)sv {
-    return [sv viewWithTag:99];
-}
+- (UIView *)viewForZoomingInScrollView:(UIScrollView *)sv { return [sv viewWithTag:99]; }
 - (void)doubleTapped:(UITapGestureRecognizer *)gr {
     UIScrollView *sv = (UIScrollView *)gr.view;
     sv.zoomScale = sv.zoomScale > 1.5 ? 1.0 : 3.0;
@@ -111,40 +127,42 @@
 @end
 
 // ============================================================
-// ZBGalleryVC - grid ảnh
+// ZBMediaListVC - danh sách file, bấm 1 cái xem liền
 // ============================================================
-@interface ZBGalleryVC : UIViewController <UICollectionViewDataSource, UICollectionViewDelegate>
-@property (nonatomic, strong) NSArray<NSDictionary *> *imageEntries;
-@property (nonatomic, strong) UICollectionView *collectionView;
-@property (nonatomic, strong) UILabel *emptyLbl;
+@interface ZBMediaListVC : UIViewController <UITableViewDataSource, UITableViewDelegate>
+@property (nonatomic, strong) NSArray<NSDictionary *> *allEntries;
+@property (nonatomic, strong) NSArray<NSDictionary *> *shown;
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UISegmentedControl *seg;
 @property (nonatomic, strong) UILabel *countLbl;
 @end
 
-@implementation ZBGalleryVC
+@implementation ZBMediaListVC
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithRed:0.09 green:0.09 blue:0.10 alpha:1];
 
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 56)];
+    // Header
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 100)];
     header.backgroundColor = [UIColor colorWithRed:0.11 green:0.11 blue:0.12 alpha:1];
     [self.view addSubview:header];
 
     UILabel *title = [UILabel new];
-    title.text = @"🖼 Ảnh trong Backup";
+    title.text = @"🖼🎬 Chọn file để xem";
     title.font = [UIFont boldSystemFontOfSize:16];
     title.textColor = UIColor.whiteColor;
-    title.frame = CGRectMake(16, 16, self.view.bounds.size.width - 100, 24);
+    title.frame = CGRectMake(16, 12, self.view.bounds.size.width - 70, 22);
     [header addSubview:title];
 
     self.countLbl = [UILabel new];
-    self.countLbl.font = [UIFont systemFontOfSize:12];
+    self.countLbl.font = [UIFont systemFontOfSize:11];
     self.countLbl.textColor = [UIColor colorWithWhite:0.5 alpha:1];
-    self.countLbl.textAlignment = NSTextAlignmentRight;
-    self.countLbl.frame = CGRectMake(self.view.bounds.size.width - 120, 18, 104, 20);
+    self.countLbl.frame = CGRectMake(16, 34, self.view.bounds.size.width - 32, 16);
     [header addSubview:self.countLbl];
 
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    closeBtn.frame = CGRectMake(self.view.bounds.size.width - 48, 10, 36, 36);
+    closeBtn.frame = CGRectMake(self.view.bounds.size.width - 48, 8, 36, 36);
     closeBtn.backgroundColor = [UIColor colorWithWhite:0.2 alpha:0.8];
     closeBtn.layer.cornerRadius = 18;
     [closeBtn setTitle:@"✕" forState:UIControlStateNormal];
@@ -152,69 +170,161 @@
     [closeBtn addTarget:self action:@selector(closeTapped) forControlEvents:UIControlEventTouchUpInside];
     [header addSubview:closeBtn];
 
-    CGFloat padding = 12, spacing = 8;
-    CGFloat cellW = (self.view.bounds.size.width - padding * 2 - spacing * 2) / 3;
-    CGFloat cellH = cellW + 18;
+    // Filter: Tất cả / Ảnh / Video
+    self.seg = [[UISegmentedControl alloc] initWithItems:@[@"Tất cả", @"🖼 Ảnh", @"🎬 Video"]];
+    self.seg.selectedSegmentIndex = 0;
+    self.seg.frame = CGRectMake(12, 56, self.view.bounds.size.width - 24, 32);
+    [self.seg addTarget:self action:@selector(segChanged) forControlEvents:UIControlEventValueChanged];
+    [header addSubview:self.seg];
 
-    UICollectionViewFlowLayout *layout = [UICollectionViewFlowLayout new];
-    layout.itemSize = CGSizeMake(cellW, cellH);
-    layout.minimumInteritemSpacing = spacing;
-    layout.minimumLineSpacing = spacing;
-    layout.sectionInset = UIEdgeInsetsMake(padding, padding, padding, padding);
+    // Table view
+    self.tableView = [[UITableView alloc]
+        initWithFrame:CGRectMake(0, 100, self.view.bounds.size.width, self.view.bounds.size.height - 100)
+        style:UITableViewStylePlain];
+    self.tableView.backgroundColor = UIColor.clearColor;
+    self.tableView.separatorColor = [UIColor colorWithWhite:1 alpha:0.07];
+    self.tableView.dataSource = self;
+    self.tableView.delegate = self;
+    self.tableView.rowHeight = 60;
+    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"row"];
+    [self.view addSubview:self.tableView];
 
-    self.collectionView = [[UICollectionView alloc]
-        initWithFrame:CGRectMake(0, 56, self.view.bounds.size.width, self.view.bounds.size.height - 56)
-        collectionViewLayout:layout];
-    self.collectionView.backgroundColor = UIColor.clearColor;
-    self.collectionView.dataSource = self;
-    self.collectionView.delegate = self;
-    [self.collectionView registerClass:[ZBGalleryCell class] forCellWithReuseIdentifier:@"cell"];
-    [self.view addSubview:self.collectionView];
-
-    self.emptyLbl = [UILabel new];
-    self.emptyLbl.text = @"Không có ảnh trong backup này";
-    self.emptyLbl.font = [UIFont systemFontOfSize:14];
-    self.emptyLbl.textColor = [UIColor colorWithWhite:0.4 alpha:1];
-    self.emptyLbl.textAlignment = NSTextAlignmentCenter;
-    self.emptyLbl.frame = CGRectMake(0, 200, self.view.bounds.size.width, 40);
-    self.emptyLbl.hidden = self.imageEntries.count > 0;
-    [self.view addSubview:self.emptyLbl];
-
-    self.countLbl.text = [NSString stringWithFormat:@"%ld ảnh", (long)self.imageEntries.count];
+    [self applyFilter];
 }
+
+- (void)segChanged { [self applyFilter]; }
+
+- (void)applyFilter {
+    NSSet *imgExts = [NSSet setWithArray:@[@"jpg",@"jpeg",@"png"]];
+    NSSet *vidExts = [NSSet setWithArray:@[@"mp4",@"mov"]];
+    NSInteger idx = self.seg.selectedSegmentIndex;
+    if (idx == 1) {
+        self.shown = [self.allEntries filteredArrayUsingPredicate:
+            [NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, id _) {
+                return [imgExts containsObject:[e[@"ext"] lowercaseString]];
+            }]];
+    } else if (idx == 2) {
+        self.shown = [self.allEntries filteredArrayUsingPredicate:
+            [NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, id _) {
+                return [vidExts containsObject:[e[@"ext"] lowercaseString]];
+            }]];
+    } else {
+        self.shown = [self.allEntries filteredArrayUsingPredicate:
+            [NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, id _) {
+                NSString *ext = [e[@"ext"] lowercaseString];
+                return [imgExts containsObject:ext] || [vidExts containsObject:ext];
+            }]];
+    }
+    // Đếm tổng
+    NSInteger imgs = [[self.allEntries filteredArrayUsingPredicate:
+        [NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, id _) {
+            return [imgExts containsObject:[e[@"ext"] lowercaseString]];
+        }]] count];
+    NSInteger vids = [[self.allEntries filteredArrayUsingPredicate:
+        [NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, id _) {
+            return [vidExts containsObject:[e[@"ext"] lowercaseString]];
+        }]] count];
+    self.countLbl.text = [NSString stringWithFormat:@"%ld ảnh  •  %ld video  •  hiện: %ld",
+        (long)imgs, (long)vids, (long)self.shown.count];
+    [self.tableView reloadData];
+}
+
 - (void)closeTapped { [self dismissViewControllerAnimated:YES completion:nil]; }
-- (NSInteger)collectionView:(UICollectionView *)cv numberOfItemsInSection:(NSInteger)s {
-    return self.imageEntries.count;
+
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
+    return self.shown.count;
 }
-- (UICollectionViewCell *)collectionView:(UICollectionView *)cv cellForItemAtIndexPath:(NSIndexPath *)ip {
-    ZBGalleryCell *cell = [cv dequeueReusableCellWithReuseIdentifier:@"cell" forIndexPath:ip];
-    NSDictionary *entry = self.imageEntries[ip.row];
+
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+    UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"row" forIndexPath:ip];
+    cell.backgroundColor = UIColor.clearColor;
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+
+    NSDictionary *entry = self.shown[ip.row];
+    NSString *ext = [entry[@"ext"] lowercaseString];
+    NSSet *vidExts = [NSSet setWithArray:@[@"mp4",@"mov"]];
+    BOOL isVideo = [vidExts containsObject:ext];
+
+    // Icon
+    cell.imageView.image = nil;
+    cell.imageView.layer.cornerRadius = 6;
+    cell.imageView.clipsToBounds = YES;
+    cell.imageView.frame = CGRectMake(12, 10, 44, 44);
+    cell.imageView.contentMode = UIViewContentModeScaleAspectFill;
+    cell.imageView.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
+
     NSString *b64 = entry[@"data"];
-    if (b64) {
+    if (isVideo) {
+        // Icon video placeholder
+        UILabel *pl = [[UILabel alloc] initWithFrame:CGRectMake(0,0,40,40)];
+        pl.text = @"🎬"; pl.font = [UIFont systemFontOfSize:22];
+        pl.textAlignment = NSTextAlignmentCenter;
+        UIGraphicsBeginImageContextWithOptions(CGSizeMake(40,40), NO, 0);
+        [pl.layer renderInContext:UIGraphicsGetCurrentContext()];
+        cell.imageView.image = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+    } else if (b64) {
         NSData *imgData = [[NSData alloc] initWithBase64EncodedString:b64 options:0];
         cell.imageView.image = imgData ? [UIImage imageWithData:imgData] : nil;
     }
+
+    // Tên file
     NSString *name = entry[@"name"] ?: @"";
     if (name.length > 2) name = [name substringFromIndex:2];
     name = [name stringByReplacingOccurrencesOfString:@"|" withString:@"/"];
-    cell.nameLbl.text = name.lastPathComponent;
+
+    cell.textLabel.text = name.lastPathComponent;
+    cell.textLabel.textColor = UIColor.whiteColor;
+    cell.textLabel.font = [UIFont systemFontOfSize:14];
+
+    // Size
+    NSInteger sizeKB = [entry[@"size"] integerValue] / 1024;
+    NSString *sizeStr = sizeKB > 1024
+        ? [NSString stringWithFormat:@"%.1f MB", sizeKB / 1024.0]
+        : [NSString stringWithFormat:@"%ld KB", (long)sizeKB];
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@  •  %@",
+        isVideo ? @"Video" : @"Ảnh", sizeStr];
+    cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1];
+
+    // Chevron
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }
-- (void)collectionView:(UICollectionView *)cv didSelectItemAtIndexPath:(NSIndexPath *)ip {
-    NSDictionary *entry = self.imageEntries[ip.row];
+
+- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
+    [tv deselectRowAtIndexPath:ip animated:YES];
+    NSDictionary *entry = self.shown[ip.row];
+    NSString *ext = [entry[@"ext"] lowercaseString];
+    NSSet *vidExts = [NSSet setWithArray:@[@"mp4",@"mov"]];
     NSString *b64 = entry[@"data"];
     if (!b64) return;
-    NSData *imgData = [[NSData alloc] initWithBase64EncodedString:b64 options:0];
-    UIImage *img = imgData ? [UIImage imageWithData:imgData] : nil;
-    if (!img) return;
 
-    ZBImageDetailVC *detail = [ZBImageDetailVC new];
-    detail.image = img;
     NSString *name = entry[@"name"] ?: @"";
     if (name.length > 2) name = [name substringFromIndex:2];
-    detail.fileName = [name stringByReplacingOccurrencesOfString:@"|" withString:@"/"];
-    detail.modalPresentationStyle = UIModalPresentationFullScreen;
-    [self presentViewController:detail animated:YES completion:nil];
+    name = [name stringByReplacingOccurrencesOfString:@"|" withString:@"/"];
+
+    if ([vidExts containsObject:ext]) {
+        // Phát video
+        NSData *videoData = [[NSData alloc] initWithBase64EncodedString:b64 options:0];
+        if (!videoData) return;
+        NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:
+            [NSString stringWithFormat:@"zbplay_%@", name.lastPathComponent]];
+        [videoData writeToFile:tmp atomically:YES];
+        AVPlayer *player = [AVPlayer playerWithURL:[NSURL fileURLWithPath:tmp]];
+        AVPlayerViewController *pvc = [AVPlayerViewController new];
+        pvc.player = player;
+        [self presentViewController:pvc animated:YES completion:^{ [player play]; }];
+    } else {
+        // Xem ảnh full screen
+        NSData *imgData = [[NSData alloc] initWithBase64EncodedString:b64 options:0];
+        UIImage *img = imgData ? [UIImage imageWithData:imgData] : nil;
+        if (!img) return;
+        ZBImageDetailVC *detail = [ZBImageDetailVC new];
+        detail.image = img;
+        detail.fileName = name;
+        detail.modalPresentationStyle = UIModalPresentationFullScreen;
+        [self presentViewController:detail animated:YES completion:nil];
+    }
 }
 @end
 
@@ -225,13 +335,15 @@
 + (instancetype)shared;
 - (void)backupFrom:(UIViewController *)vc silent:(BOOL)silent;
 - (void)restoreFrom:(UIViewController *)vc;
-- (void)viewGalleryFrom:(UIViewController *)vc;
+- (void)viewMediaFrom:(UIViewController *)vc;
 - (void)startAutoBackup:(NSInteger)hours vc:(UIViewController *)vc;
 - (void)stopAutoBackup;
+- (void)toggleKeepAlive;
 @property (nonatomic, strong) UIViewController *pendingVC;
 @property (nonatomic, assign) BOOL busy;
 @property (nonatomic, strong) NSTimer *autoTimer;
 @property (nonatomic, assign) NSInteger autoHours;
+@property (nonatomic, assign) BOOL keepAlive;
 @property (nonatomic, copy) void(^onStateChange)(void);
 @end
 
@@ -254,9 +366,9 @@
         @{@"path": [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches"], @"prefix": @"C|"}
     ];
     NSSet *exts = [NSSet setWithArray:@[
-        @"db", @"sqlite", @"sqlite3", @"sqlite-wal", @"sqlite-shm",
-        @"db-wal", @"db-shm", @"jpg", @"jpeg", @"png",
-        @"mp4", @"mov", @"plist", @"m4a", @"aac", @"mp3"
+        @"db",@"sqlite",@"sqlite3",@"sqlite-wal",@"sqlite-shm",
+        @"db-wal",@"db-shm",@"jpg",@"jpeg",@"png",
+        @"mp4",@"mov",@"plist",@"m4a",@"aac",@"mp3"
     ]];
     NSMutableArray *entries = [NSMutableArray array];
     for (NSDictionary *src in sources) {
@@ -323,11 +435,50 @@
                 [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
                 [[NSFileManager defaultManager] copyItemAtPath:tmp toPath:dest error:nil];
             } else {
-                UIActivityViewController *avc = [[UIActivityViewController alloc]
-                    initWithActivityItems:@[[NSURL fileURLWithPath:tmp]] applicationActivities:nil];
+                NSUInteger fileSizeKB = jsonData.length / 1024;
+                UIAlertController *ac = [UIAlertController
+                    alertControllerWithTitle:@"Backup hoàn tất ✅"
+                    message:[NSString stringWithFormat:@"File: %@\nKích thước: %lu KB\n%ld files\n\nBạn muốn lưu đâu?",
+                        fname, (unsigned long)fileSizeKB, (long)entries.count]
+                    preferredStyle:UIAlertControllerStyleActionSheet];
+                [ac addAction:[UIAlertAction actionWithTitle:@"💾  Lưu vào Documents"
+                    style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+                        NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+                        NSString *dest = [docs stringByAppendingPathComponent:fname];
+                        NSError *cpErr = nil;
+                        [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
+                        [[NSFileManager defaultManager] copyItemAtPath:tmp toPath:dest error:&cpErr];
+                        NSString *msg = cpErr ? @"Lưu thất bại!" : [NSString stringWithFormat:@"Đã lưu:\n%@", dest];
+                        UIAlertController *ok2 = [UIAlertController
+                            alertControllerWithTitle:cpErr ? @"Lỗi" : @"Thành công"
+                            message:msg preferredStyle:UIAlertControllerStyleAlert];
+                        [ok2 addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                        [[self topVC:vc] presentViewController:ok2 animated:YES completion:nil];
+                    }]];
+                [ac addAction:[UIAlertAction actionWithTitle:@"📤  Chia sẻ / Lưu ra Files"
+                    style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+                        UIActivityViewController *avc = [[UIActivityViewController alloc]
+                            initWithActivityItems:@[[NSURL fileURLWithPath:tmp]] applicationActivities:nil];
+                        if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad)
+                            avc.popoverPresentationController.sourceView = vc.view;
+                        [[self topVC:vc] presentViewController:avc animated:YES completion:nil];
+                    }]];
+                [ac addAction:[UIAlertAction actionWithTitle:@"💾 + 📤  Lưu cả hai"
+                    style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+                        NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+                        NSString *dest = [docs stringByAppendingPathComponent:fname];
+                        [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
+                        [[NSFileManager defaultManager] copyItemAtPath:tmp toPath:dest error:nil];
+                        UIActivityViewController *avc = [[UIActivityViewController alloc]
+                            initWithActivityItems:@[[NSURL fileURLWithPath:tmp]] applicationActivities:nil];
+                        if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad)
+                            avc.popoverPresentationController.sourceView = vc.view;
+                        [[self topVC:vc] presentViewController:avc animated:YES completion:nil];
+                    }]];
+                [ac addAction:[UIAlertAction actionWithTitle:@"Hủy" style:UIAlertActionStyleCancel handler:nil]];
                 if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad)
-                    avc.popoverPresentationController.sourceView = vc.view;
-                [[self topVC:vc] presentViewController:avc animated:YES completion:nil];
+                    ac.popoverPresentationController.sourceView = vc.view;
+                [[self topVC:vc] presentViewController:ac animated:YES completion:nil];
             }
         });
     });
@@ -335,8 +486,7 @@
 
 - (void)startAutoBackup:(NSInteger)hours vc:(UIViewController *)vc {
     [self stopAutoBackup];
-    self.autoHours = hours;
-    self.pendingVC = vc;
+    self.autoHours = hours; self.pendingVC = vc;
     [self backupFrom:vc silent:YES];
     self.autoTimer = [NSTimer scheduledTimerWithTimeInterval:hours * 3600
         target:self selector:@selector(autoFire) userInfo:nil repeats:YES];
@@ -344,8 +494,13 @@
 }
 - (void)autoFire { [self backupFrom:self.pendingVC silent:YES]; }
 - (void)stopAutoBackup {
-    [self.autoTimer invalidate];
-    self.autoTimer = nil;
+    [self.autoTimer invalidate]; self.autoTimer = nil;
+    if (self.onStateChange) self.onStateChange();
+}
+
+- (void)toggleKeepAlive {
+    self.keepAlive = !self.keepAlive;
+    self.keepAlive ? [ZBBackground startKeepAlive] : [ZBBackground stopKeepAlive];
     if (self.onStateChange) self.onStateChange();
 }
 
@@ -353,72 +508,55 @@
     if (self.busy) return;
     self.pendingVC = vc;
     UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc]
-        initWithDocumentTypes:@[@"public.json", @"public.text", @"public.data"]
+        initWithDocumentTypes:@[@"public.json",@"public.text",@"public.data"]
         inMode:UIDocumentPickerModeImport];
     objc_setAssociatedObject(p, "zbmode", @"restore", OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    p.delegate = self;
-    p.allowsMultipleSelection = NO;
+    p.delegate = self; p.allowsMultipleSelection = NO;
     [[self topVC:vc] presentViewController:p animated:YES completion:nil];
 }
 
-- (void)viewGalleryFrom:(UIViewController *)vc {
+- (void)viewMediaFrom:(UIViewController *)vc {
     self.pendingVC = vc;
     UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc]
-        initWithDocumentTypes:@[@"public.json", @"public.text", @"public.data"]
+        initWithDocumentTypes:@[@"public.json",@"public.text",@"public.data"]
         inMode:UIDocumentPickerModeImport];
-    objc_setAssociatedObject(p, "zbmode", @"gallery", OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    p.delegate = self;
-    p.allowsMultipleSelection = NO;
+    objc_setAssociatedObject(p, "zbmode", @"media", OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    p.delegate = self; p.allowsMultipleSelection = NO;
     [[self topVC:vc] presentViewController:p animated:YES completion:nil];
 }
 
 - (void)documentPicker:(UIDocumentPickerViewController *)c didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    NSURL *url = urls.firstObject;
-    if (!url) return;
+    NSURL *url = urls.firstObject; if (!url) return;
     UIViewController *vc = self.pendingVC;
-
     NSString *mode = objc_getAssociatedObject(c, "zbmode") ?: @"restore";
-
     NSData *jsonData = [NSData dataWithContentsOfURL:url];
     if (!jsonData) return;
     NSError *err = nil;
     NSDictionary *jsonRoot = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:&err];
-
     if (err || !jsonRoot[@"files"]) {
         UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Lỗi"
-            message:@"File JSON không hợp lệ hoặc bị hỏng."
-            preferredStyle:UIAlertControllerStyleAlert];
+            message:@"File JSON không hợp lệ." preferredStyle:UIAlertControllerStyleAlert];
         [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [[self topVC:vc] presentViewController:ac animated:YES completion:nil];
         return;
     }
 
-    // ---- GALLERY MODE ----
-    if ([mode isEqualToString:@"gallery"]) {
-        NSArray *allFiles = jsonRoot[@"files"];
-        NSSet *imgExts = [NSSet setWithArray:@[@"jpg", @"jpeg", @"png"]];
-        NSArray *images = [allFiles filteredArrayUsingPredicate:
-            [NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, id _) {
-                return [imgExts containsObject:[e[@"ext"] lowercaseString]];
-            }]];
-        ZBGalleryVC *gallery = [ZBGalleryVC new];
-        gallery.imageEntries = images;
-        gallery.modalPresentationStyle = UIModalPresentationPageSheet;
-        [[self topVC:vc] presentViewController:gallery animated:YES completion:nil];
+    if ([mode isEqualToString:@"media"]) {
+        ZBMediaListVC *list = [ZBMediaListVC new];
+        list.allEntries = jsonRoot[@"files"];
+        list.modalPresentationStyle = UIModalPresentationPageSheet;
+        [[self topVC:vc] presentViewController:list animated:YES completion:nil];
         return;
     }
 
-    // ---- RESTORE MODE ----
+    // Restore
     NSString *created = jsonRoot[@"created"] ?: @"?";
     NSString *device = jsonRoot[@"device"] ?: @"?";
     NSInteger fileCount = [jsonRoot[@"fileCount"] integerValue];
-
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Xác Nhận Khôi Phục"
-        message:[NSString stringWithFormat:
-            @"File: %@\nNgày tạo: %@\nThiết bị: %@\nSố file: %ld\n\nDữ liệu sẽ bị ghi đè. App tự đóng sau khi xong.",
+        message:[NSString stringWithFormat:@"File: %@\nNgày tạo: %@\nThiết bị: %@\nSố file: %ld\n\nDữ liệu sẽ bị ghi đè. App tự đóng sau khi xong.",
             url.lastPathComponent, created, device, (long)fileCount]
         preferredStyle:UIAlertControllerStyleAlert];
-
     [ac addAction:[UIAlertAction actionWithTitle:@"Khôi Phục" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
         self.busy = YES;
         if (self.onStateChange) self.onStateChange();
@@ -426,26 +564,20 @@
             NSArray *files = jsonRoot[@"files"];
             NSFileManager *fm = NSFileManager.defaultManager;
             for (NSDictionary *entry in files) {
-                NSString *name = entry[@"name"];
-                NSString *b64 = entry[@"data"];
+                NSString *name = entry[@"name"]; NSString *b64 = entry[@"data"];
                 if (!name || !b64 || name.length < 3) continue;
                 NSData *d = [[NSData alloc] initWithBase64EncodedString:b64 options:0];
                 if (!d) continue;
-                NSString *rel = [[name substringFromIndex:2]
-                    stringByReplacingOccurrencesOfString:@"|" withString:@"/"];
+                NSString *rel = [[name substringFromIndex:2] stringByReplacingOccurrencesOfString:@"|" withString:@"/"];
                 NSString *dst = nil;
                 if ([name hasPrefix:@"L|"])
-                    dst = [[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"]
-                        stringByAppendingPathComponent:rel];
+                    dst = [[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"] stringByAppendingPathComponent:rel];
                 else if ([name hasPrefix:@"D|"])
-                    dst = [[NSHomeDirectory() stringByAppendingPathComponent:@"Documents"]
-                        stringByAppendingPathComponent:rel];
+                    dst = [[NSHomeDirectory() stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:rel];
                 else if ([name hasPrefix:@"C|"])
-                    dst = [[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches"]
-                        stringByAppendingPathComponent:rel];
+                    dst = [[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches"] stringByAppendingPathComponent:rel];
                 if (dst) {
-                    [fm createDirectoryAtPath:dst.stringByDeletingLastPathComponent
-                        withIntermediateDirectories:YES attributes:nil error:nil];
+                    [fm createDirectoryAtPath:dst.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
                     [d writeToFile:dst atomically:YES];
                 }
             }
@@ -459,7 +591,6 @@
     [ac addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
     [[self topVC:vc] presentViewController:ac animated:YES completion:nil];
 }
-
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)c {}
 @end
 
@@ -493,8 +624,6 @@
     self.hidden = NO;
 
     CGRect screen = UIScreen.mainScreen.bounds;
-
-    // Floating Button
     self.btn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.btn.frame = CGRectMake(screen.size.width - 70, screen.size.height * 0.52, 56, 56);
     self.btn.backgroundColor = [UIColor colorWithRed:0.11 green:0.11 blue:0.12 alpha:0.88];
@@ -510,12 +639,11 @@
     [self.btn addTarget:self action:@selector(btnTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.btn addTarget:self action:@selector(btnDown) forControlEvents:UIControlEventTouchDown];
     [self.btn addTarget:self action:@selector(btnUp) forControlEvents:
-        UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
+        UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(pan:)];
     [self.btn addGestureRecognizer:pan];
     [self.rootVC.view addSubview:self.btn];
 
-    // Badge dot
     self.badgeDot = [[UIView alloc] initWithFrame:CGRectMake(38, 2, 13, 13)];
     self.badgeDot.backgroundColor = [UIColor colorWithRed:0.2 green:0.85 blue:0.4 alpha:1];
     self.badgeDot.layer.cornerRadius = 6.5;
@@ -525,19 +653,16 @@
     [self.btn addSubview:self.badgeDot];
 
     [self buildPanel];
-
     __weak ZBWindow *ws = self;
     [ZBManager shared].onStateChange = ^{
         dispatch_async(dispatch_get_main_queue(), ^{ [ws updateUI]; });
     };
-
     return self;
 }
 
 - (void)buildPanel {
     CGFloat W = 240, rowH = 52, headerH = 54;
-    NSInteger rows = 5; // Backup, Restore, Gallery, Auto, Đóng
-    CGFloat H = headerH + rowH * rows;
+    CGFloat H = headerH + rowH * 6;
 
     self.panel = [[UIView alloc] initWithFrame:CGRectMake(0, 0, W, H)];
     self.panel.backgroundColor = [UIColor colorWithRed:0.11 green:0.11 blue:0.12 alpha:0.96];
@@ -548,20 +673,17 @@
     self.panel.layer.shadowOpacity = 0.35;
     self.panel.layer.shadowRadius = 20;
     self.panel.layer.shadowOffset = CGSizeMake(0, 6);
-    self.panel.alpha = 0;
-    self.panel.hidden = YES;
-    self.panel.clipsToBounds = NO;
+    self.panel.alpha = 0; self.panel.hidden = YES; self.panel.clipsToBounds = NO;
 
     UILabel *titleIcon = [UILabel new];
-    titleIcon.text = @"🔐";
-    titleIcon.font = [UIFont systemFontOfSize:18];
+    titleIcon.text = @"🔐"; titleIcon.font = [UIFont systemFontOfSize:18];
     titleIcon.frame = CGRectMake(14, 14, 28, 26);
     [self.panel addSubview:titleIcon];
 
     UILabel *titleLbl = [UILabel new];
     titleLbl.text = @"ZaloBackup Pro";
     titleLbl.font = [UIFont boldSystemFontOfSize:14];
-    titleLbl.textColor = [UIColor whiteColor];
+    titleLbl.textColor = UIColor.whiteColor;
     titleLbl.frame = CGRectMake(46, 10, W - 60, 20);
     [self.panel addSubview:titleLbl];
 
@@ -577,11 +699,12 @@
     [self.panel addSubview:div];
 
     NSArray *rowData = @[
-        @{@"icon": @"📦", @"title": @"Backup",      @"tag": @1},
-        @{@"icon": @"🔄", @"title": @"Restore",     @"tag": @2},
-        @{@"icon": @"🖼", @"title": @"Xem Ảnh",     @"tag": @5},
-        @{@"icon": @"⏱", @"title": @"Auto Backup",  @"tag": @3},
-        @{@"icon": @"✕",  @"title": @"Đóng",        @"tag": @4},
+        @{@"icon":@"📦", @"title":@"Backup",           @"tag":@1},
+        @{@"icon":@"🔄", @"title":@"Restore",          @"tag":@2},
+        @{@"icon":@"🖼",  @"title":@"Xem Ảnh & Video", @"tag":@5},
+        @{@"icon":@"⏱",  @"title":@"Auto Backup",      @"tag":@3},
+        @{@"icon":@"🔁", @"title":@"Chạy Nền",         @"tag":@6},
+        @{@"icon":@"✕",  @"title":@"Đóng",             @"tag":@4},
     ];
 
     for (int i = 0; i < (int)rowData.count; i++) {
@@ -593,23 +716,18 @@
         [row addTarget:self action:@selector(rowTapped:) forControlEvents:UIControlEventTouchUpInside];
         [row addTarget:self action:@selector(rowDown:) forControlEvents:UIControlEventTouchDown];
         [row addTarget:self action:@selector(rowUp:) forControlEvents:
-            UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
+            UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
 
         UILabel *iconL = [UILabel new];
-        iconL.text = rd[@"icon"];
-        iconL.font = [UIFont systemFontOfSize:20];
-        iconL.frame = CGRectMake(14, 0, 32, rowH);
-        iconL.userInteractionEnabled = NO;
+        iconL.text = rd[@"icon"]; iconL.font = [UIFont systemFontOfSize:20];
+        iconL.frame = CGRectMake(14, 0, 32, rowH); iconL.userInteractionEnabled = NO;
         [row addSubview:iconL];
 
         UILabel *titleL = [UILabel new];
-        titleL.text = rd[@"title"];
-        titleL.font = [UIFont systemFontOfSize:15];
+        titleL.text = rd[@"title"]; titleL.font = [UIFont systemFontOfSize:15];
         titleL.textColor = [rd[@"tag"] integerValue] == 4
-            ? [UIColor colorWithRed:1 green:0.3 blue:0.3 alpha:1]
-            : [UIColor whiteColor];
-        titleL.frame = CGRectMake(54, 0, W - 70, rowH);
-        titleL.userInteractionEnabled = NO;
+            ? [UIColor colorWithRed:1 green:0.3 blue:0.3 alpha:1] : UIColor.whiteColor;
+        titleL.frame = CGRectMake(54, 0, W - 70, rowH); titleL.userInteractionEnabled = NO;
         [row addSubview:titleL];
 
         if (i < (int)rowData.count - 1) {
@@ -619,58 +737,36 @@
         }
         [self.panel addSubview:row];
     }
-
     [self.rootVC.view addSubview:self.panel];
 }
 
 - (void)rowDown:(UIButton *)row {
-    [UIView animateWithDuration:0.08 animations:^{
-        row.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-    }];
+    [UIView animateWithDuration:0.08 animations:^{ row.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08]; }];
 }
 - (void)rowUp:(UIButton *)row {
-    [UIView animateWithDuration:0.15 animations:^{
-        row.backgroundColor = UIColor.clearColor;
-    }];
+    [UIView animateWithDuration:0.15 animations:^{ row.backgroundColor = UIColor.clearColor; }];
 }
 - (void)rowTapped:(UIButton *)row {
     switch (row.tag) {
-        case 1:
-            [self dismissPanel];
-            [[ZBManager shared] backupFrom:self.rootVC silent:NO];
-            break;
-        case 2:
-            [self dismissPanel];
-            [[ZBManager shared] restoreFrom:self.rootVC];
-            break;
-        case 3:
-            [self handleAutoBackup];
-            break;
-        case 4:
-            [self dismissPanel];
-            break;
-        case 5:
-            [self dismissPanel];
-            [[ZBManager shared] viewGalleryFrom:self.rootVC];
-            break;
+        case 1: [self dismissPanel]; [[ZBManager shared] backupFrom:self.rootVC silent:NO]; break;
+        case 2: [self dismissPanel]; [[ZBManager shared] restoreFrom:self.rootVC]; break;
+        case 3: [self handleAutoBackup]; break;
+        case 4: [self dismissPanel]; break;
+        case 5: [self dismissPanel]; [[ZBManager shared] viewMediaFrom:self.rootVC]; break;
+        case 6: [self dismissPanel]; [[ZBManager shared] toggleKeepAlive]; break;
     }
 }
 
 - (void)handleAutoBackup {
     ZBManager *mgr = [ZBManager shared];
-    if (mgr.autoTimer) {
-        [self dismissPanel];
-        [mgr stopAutoBackup];
-        return;
-    }
+    if (mgr.autoTimer) { [self dismissPanel]; [mgr stopAutoBackup]; return; }
     [self dismissPanel];
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Auto Backup"
         message:@"Tự động backup mỗi bao lâu?" preferredStyle:UIAlertControllerStyleActionSheet];
-    NSArray *opts = @[@"1 giờ", @"2 giờ", @"4 giờ", @"6 giờ", @"12 giờ", @"24 giờ"];
-    NSArray *vals = @[@1, @2, @4, @6, @12, @24];
+    NSArray *opts = @[@"1 giờ",@"2 giờ",@"4 giờ",@"6 giờ",@"12 giờ",@"24 giờ"];
+    NSArray *vals = @[@1,@2,@4,@6,@12,@24];
     for (int i = 0; i < (int)opts.count; i++) {
-        NSInteger h = [vals[i] integerValue];
-        NSString *t = opts[i];
+        NSInteger h = [vals[i] integerValue]; NSString *t = opts[i];
         [ac addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
             [mgr startAutoBackup:h vc:self.rootVC];
         }]];
@@ -683,61 +779,53 @@
 
 - (void)updateUI {
     ZBManager *m = [ZBManager shared];
-    self.badgeDot.hidden = !m.autoTimer;
+    self.badgeDot.hidden = !(m.autoTimer || m.keepAlive);
     if (m.busy) {
         self.statusLbl.text = @"Đang xử lý...";
         self.statusLbl.textColor = [UIColor colorWithRed:1 green:0.6 blue:0 alpha:1];
-    } else if (m.autoTimer) {
-        self.statusLbl.text = [NSString stringWithFormat:@"Auto: mỗi %ldh • Đang chạy", (long)m.autoHours];
-        self.statusLbl.textColor = [UIColor colorWithRed:0.2 green:0.85 blue:0.4 alpha:1];
-        for (UIView *v in self.panel.subviews) {
-            if ([v isKindOfClass:[UIButton class]] && v.tag == 3) {
-                for (UIView *sv in v.subviews) {
-                    if ([sv isKindOfClass:[UILabel class]]) {
-                        UILabel *l = (UILabel *)sv;
-                        if ([l.text isEqualToString:@"Auto Backup"] || [l.text hasPrefix:@"Dừng Auto"])
-                            l.text = [NSString stringWithFormat:@"Dừng Auto (%ldh)", (long)m.autoHours];
-                    }
-                }
-            }
-        }
     } else {
-        self.statusLbl.text = @"Sẵn Sàng";
-        self.statusLbl.textColor = [UIColor colorWithWhite:0.5 alpha:1];
-        for (UIView *v in self.panel.subviews) {
-            if ([v isKindOfClass:[UIButton class]] && v.tag == 3) {
-                for (UIView *sv in v.subviews) {
-                    if ([sv isKindOfClass:[UILabel class]]) {
-                        UILabel *l = (UILabel *)sv;
-                        if ([l.text hasPrefix:@"Dừng Auto"]) l.text = @"Auto Backup";
-                    }
-                }
+        NSMutableArray *st = [NSMutableArray array];
+        if (m.autoTimer) [st addObject:[NSString stringWithFormat:@"Auto %ldh",(long)m.autoHours]];
+        if (m.keepAlive) [st addObject:@"Chạy nền"];
+        if (st.count) {
+            self.statusLbl.text = [st componentsJoinedByString:@" • "];
+            self.statusLbl.textColor = [UIColor colorWithRed:0.2 green:0.85 blue:0.4 alpha:1];
+        } else {
+            self.statusLbl.text = @"Sẵn Sàng";
+            self.statusLbl.textColor = [UIColor colorWithWhite:0.5 alpha:1];
+        }
+    }
+    for (UIView *v in self.panel.subviews) {
+        if (![v isKindOfClass:[UIButton class]]) continue;
+        for (UIView *sv in v.subviews) {
+            if (![sv isKindOfClass:[UILabel class]]) continue;
+            UILabel *l = (UILabel *)sv;
+            ZBManager *m2 = [ZBManager shared];
+            if (v.tag == 3 && ([l.text hasPrefix:@"Auto"] || [l.text hasPrefix:@"Dừng Auto"]))
+                l.text = m2.autoTimer ? [NSString stringWithFormat:@"Dừng Auto (%ldh)",(long)m2.autoHours] : @"Auto Backup";
+            if (v.tag == 6 && ([l.text isEqualToString:@"Chạy Nền"] || [l.text isEqualToString:@"Dừng Chạy Nền"])) {
+                l.text = m2.keepAlive ? @"Dừng Chạy Nền" : @"Chạy Nền";
+                l.textColor = m2.keepAlive ? [UIColor colorWithRed:0.2 green:0.85 blue:0.4 alpha:1] : UIColor.whiteColor;
             }
         }
     }
 }
 
 - (void)btnDown {
-    [UIView animateWithDuration:0.1 animations:^{
-        self.btn.transform = CGAffineTransformMakeScale(0.9, 0.9);
-    }];
+    [UIView animateWithDuration:0.1 animations:^{ self.btn.transform = CGAffineTransformMakeScale(0.9,0.9); }];
 }
 - (void)btnUp {
-    [UIView animateWithDuration:0.2 delay:0 usingSpringWithDamping:0.5
-        initialSpringVelocity:0.5 options:0 animations:^{
-        self.btn.transform = CGAffineTransformIdentity;
-    } completion:nil];
+    [UIView animateWithDuration:0.2 delay:0 usingSpringWithDamping:0.5 initialSpringVelocity:0.5 options:0
+        animations:^{ self.btn.transform = CGAffineTransformIdentity; } completion:nil];
 }
 - (void)btnTapped {
     if (self.panelShown) { [self dismissPanel]; return; }
     [self showPanel];
 }
 - (void)showPanel {
-    self.panelShown = YES;
-    [self updateUI];
-    CGRect bf = self.btn.frame;
-    CGRect bounds = self.rootVC.view.bounds;
-    CGFloat pw = 240, ph = 54 + 52 * 5;
+    self.panelShown = YES; [self updateUI];
+    CGRect bf = self.btn.frame, bounds = self.rootVC.view.bounds;
+    CGFloat pw = 240, ph = 54 + 52 * 6;
     CGFloat px = bf.origin.x - pw - 8;
     if (px < 8) px = bf.origin.x + bf.size.width + 8;
     CGFloat py = bf.origin.y;
@@ -746,26 +834,22 @@
     self.panel.hidden = NO;
     self.panel.transform = CGAffineTransformMakeScale(0.88, 0.88);
     [self.rootVC.view bringSubviewToFront:self.panel];
-    [UIView animateWithDuration:0.28 delay:0 usingSpringWithDamping:0.8
-        initialSpringVelocity:0.3 options:UIViewAnimationOptionCurveEaseOut animations:^{
-        self.panel.alpha = 1;
-        self.panel.transform = CGAffineTransformIdentity;
+    [UIView animateWithDuration:0.28 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.3
+        options:UIViewAnimationOptionCurveEaseOut animations:^{
+        self.panel.alpha = 1; self.panel.transform = CGAffineTransformIdentity;
     } completion:nil];
 }
 - (void)dismissPanel {
     self.panelShown = NO;
     [UIView animateWithDuration:0.18 animations:^{
-        self.panel.alpha = 0;
-        self.panel.transform = CGAffineTransformMakeScale(0.9, 0.9);
+        self.panel.alpha = 0; self.panel.transform = CGAffineTransformMakeScale(0.9,0.9);
     } completion:^(BOOL f) {
-        self.panel.hidden = YES;
-        self.panel.transform = CGAffineTransformMakeScale(0.88, 0.88);
+        self.panel.hidden = YES; self.panel.transform = CGAffineTransformMakeScale(0.88,0.88);
     }];
 }
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     CGPoint p = [self.rootVC.view convertPoint:point fromView:self];
-    if (!self.panel.hidden && CGRectContainsPoint(self.panel.frame, p))
-        return [super hitTest:point withEvent:event];
+    if (!self.panel.hidden && CGRectContainsPoint(self.panel.frame, p)) return [super hitTest:point withEvent:event];
     if (CGRectContainsPoint(self.btn.frame, p)) return self.btn;
     if (self.rootVC.presentedViewController) return [super hitTest:point withEvent:event];
     return nil;
@@ -789,19 +873,17 @@ static void launchZPRO() {
     UIWindowScene *scene = nil;
     for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
         if (s.activationState == UISceneActivationStateForegroundActive &&
-            [s isKindOfClass:[UIWindowScene class]]) {
-            scene = (UIWindowScene *)s; break;
-        }
+            [s isKindOfClass:[UIWindowScene class]]) { scene = (UIWindowScene *)s; break; }
     }
     if (scene) {
         zWin = [[ZBWindow alloc] initWithWindowScene:scene];
     } else {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),
             dispatch_get_main_queue(), ^{ launchZPRO(); });
     }
 }
 __attribute__((constructor))
 static void zbInit() {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),
         dispatch_get_main_queue(), ^{ launchZPRO(); });
 }
