@@ -1,17 +1,14 @@
 name: Build ZaloBackupPro dylib
-
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Compile dylib
         run: |
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
@@ -23,10 +20,8 @@ jobs:
             -mios-version-min=13.0 \
             -fobjc-arc \
             -dynamiclib \
-            -lz \
             -o ZaloBackupPro.dylib \
             ZaloBackupPro.m
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
