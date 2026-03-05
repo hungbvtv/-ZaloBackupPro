@@ -17,6 +17,8 @@ jobs:
             -framework Foundation \
             -framework UIKit \
             -framework CoreGraphics \
+            -framework AVFoundation \
+            -framework AVKit \
             -mios-version-min=13.0 \
             -fobjc-arc \
             -dynamiclib \
